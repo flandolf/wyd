@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
-import { Plus, Timer, BarChart3, Download, Upload, Settings, LogOut } from "lucide-react"
+import { Plus, Timer, BarChart3, Download, Upload, Settings, LogOut, Cloud, CloudOff, AlertCircle, RefreshCw } from "lucide-react"
 import { StopwatchItem, type StopwatchData } from "./components/StopwatchItem"
 import { useAuth } from "./components/AuthProvider"
 import { useFirebaseSync } from "./hooks/useFirebaseSync"
@@ -18,6 +18,59 @@ const PRESET_COLORS = [
   '#ec4899', // pink
 ]
 
+function localDateKeyFromMs(ms: number): string {
+  const d = new Date(ms)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function completeRunningSession(sw: StopwatchData, now: number): StopwatchData {
+  const addedTime = sw.startTime ? now - sw.startTime : 0
+  const currentSessions = sw.sessions || []
+  const sessionStartMs = sw.startTime ?? now
+  const endedAtIso = new Date(now).toISOString()
+  const startedAtIso = new Date(sessionStartMs).toISOString()
+  const date = localDateKeyFromMs(sessionStartMs)
+
+  const newSessions = [
+    ...currentSessions,
+    {
+      date,
+      durationMs: addedTime,
+      startedAtIso,
+      endedAtIso,
+    },
+  ]
+
+  return {
+    ...sw,
+    isRunning: false,
+    startTime: null,
+    accumulatedTime: sw.accumulatedTime + addedTime,
+    sessions: newSessions,
+  }
+}
+
+function normalizeStopwatches(data: StopwatchData[]): StopwatchData[] {
+  return data.map((sw) => ({
+    ...sw,
+    sessions: (sw.sessions || []).map((session) => {
+      if (session.startedAtIso && session.endedAtIso) return session
+
+      const fallbackStart = new Date(`${session.date}T00:00:00.000Z`).toISOString()
+      const fallbackEnd = new Date(new Date(fallbackStart).getTime() + Math.max(0, session.durationMs)).toISOString()
+
+      return {
+        ...session,
+        startedAtIso: session.startedAtIso || fallbackStart,
+        endedAtIso: session.endedAtIso || fallbackEnd,
+      }
+    }),
+  }))
+}
+
 function App(): React.JSX.Element {
   const [stopwatches, setStopwatches] = useState<StopwatchData[]>([])
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null)
@@ -27,6 +80,10 @@ function App(): React.JSX.Element {
   const [currentTimeMs, setCurrentTimeMs] = useState(Date.now())
   const [restStartTime, setRestStartTime] = useState<number | null>(null)
   const [dailyGoalMs, setDailyGoalMs] = useState(4 * 60 * 60 * 1000) // Default 4 hours
+  const [pomodoroDurationMs, setPomodoroDurationMs] = useState(25 * 60 * 1000)
+  const [breakDurationMs, setBreakDurationMs] = useState(5 * 60 * 1000)
+  const [activeBreak, setActiveBreak] = useState<{ taskId: string, endsAt: number } | null>(null)
+  const [isStudySessionActive, setIsStudySessionActive] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { user, signInEmail, signUpEmail, logOut } = useAuth()
@@ -36,14 +93,18 @@ function App(): React.JSX.Element {
   const [isSignUp, setIsSignUp] = useState(false)
 
   const handleRemoteUpdate = useCallback((data: StopwatchData[]) => {
-    setStopwatches(data)
+    setStopwatches(normalizeStopwatches(data))
   }, [])
 
-  useFirebaseSync(user, stopwatches, isLoaded, handleRemoteUpdate)
+  const { syncState, syncError, retrySync } = useFirebaseSync(user, stopwatches, isLoaded, handleRemoteUpdate)
 
   useEffect(() => {
     const savedGoal = localStorage.getItem('wyd-daily-goal')
     if (savedGoal) setDailyGoalMs(Number(savedGoal))
+    const savedPomodoroDuration = localStorage.getItem('wyd-pomodoro-duration-ms')
+    if (savedPomodoroDuration) setPomodoroDurationMs(Number(savedPomodoroDuration))
+    const savedBreakDuration = localStorage.getItem('wyd-break-duration-ms')
+    if (savedBreakDuration) setBreakDurationMs(Number(savedBreakDuration))
 
     invoke<StopwatchData[]>('load_data').then(saved => {
       let loadedData = []
@@ -54,8 +115,12 @@ function App(): React.JSX.Element {
         if (lsSaved) loadedData = JSON.parse(lsSaved)
       }
 
-      const todayDate = new Date().toISOString().split('T')[0]
+      const todayDate = localDateKeyFromMs(Date.now())
       const lastActiveDate = localStorage.getItem('wyd-last-active-date')
+      const savedSessionActive = localStorage.getItem('wyd-study-session-active')
+      const sessionActive = savedSessionActive === 'true'
+
+      loadedData = normalizeStopwatches(loadedData)
 
       if (lastActiveDate && lastActiveDate !== todayDate) {
         loadedData = loadedData.map((sw: StopwatchData) => ({
@@ -68,17 +133,21 @@ function App(): React.JSX.Element {
       }
 
       localStorage.setItem('wyd-last-active-date', todayDate)
+      setIsStudySessionActive(sessionActive)
       setStopwatches(loadedData)
       setIsLoaded(true)
       
       const isAnyRunning = loadedData.some((sw: StopwatchData) => sw.isRunning)
-      if (!isAnyRunning) {
+      if (sessionActive && !isAnyRunning) {
         const savedRestStart = localStorage.getItem('wyd-rest-start')
         if (savedRestStart) setRestStartTime(Number(savedRestStart))
         else {
           setRestStartTime(Date.now())
           localStorage.setItem('wyd-rest-start', Date.now().toString())
         }
+      } else {
+        setRestStartTime(null)
+        localStorage.removeItem('wyd-rest-start')
       }
     })
   }, [])
@@ -87,9 +156,11 @@ function App(): React.JSX.Element {
     if (isLoaded) {
       invoke('save_data', { data: stopwatches })
       localStorage.setItem('wyd-stopwatches', JSON.stringify(stopwatches))
-      localStorage.setItem('wyd-last-active-date', new Date().toISOString().split('T')[0])
+      localStorage.setItem('wyd-last-active-date', localDateKeyFromMs(Date.now()))
+      localStorage.setItem('wyd-study-session-active', isStudySessionActive ? 'true' : 'false')
+      window.dispatchEvent(new Event('wyd:data-updated'))
     }
-  }, [stopwatches, isLoaded])
+  }, [stopwatches, isLoaded, isStudySessionActive])
 
   const exportToJson = () => {
     const dataStr = JSON.stringify(stopwatches, null, 2)
@@ -113,9 +184,10 @@ function App(): React.JSX.Element {
       try {
         const importedData = JSON.parse(event.target?.result as string) as StopwatchData[]
         if (Array.isArray(importedData)) {
+          const normalizedImported = normalizeStopwatches(importedData)
           setStopwatches(prev => {
             const next = [...prev]
-            importedData.forEach(importedItem => {
+            normalizedImported.forEach(importedItem => {
               const existingIndex = next.findIndex(sw => sw.id === importedItem.id)
               if (existingIndex >= 0) {
                 next[existingIndex] = { ...next[existingIndex], ...importedItem }
@@ -137,7 +209,7 @@ function App(): React.JSX.Element {
   const isTimerRunning = stopwatches.some(sw => sw.isRunning)
 
   useEffect(() => {
-    if (!isTimerRunning && !restStartTime) {
+    if (!isTimerRunning && !restStartTime && !activeBreak) {
       setCurrentTimeMs(Date.now())
       return
     }
@@ -150,7 +222,24 @@ function App(): React.JSX.Element {
 
     updateTime()
     return () => cancelAnimationFrame(animationFrameId)
-  }, [isTimerRunning, restStartTime])
+  }, [isTimerRunning, restStartTime, activeBreak])
+
+  useEffect(() => {
+    if (!activeBreak) return
+    if (currentTimeMs < activeBreak.endsAt) return
+
+    const resumedAt = Date.now()
+    setStopwatches((prev) => prev.map((sw) => {
+      if (sw.id !== activeBreak.taskId || sw.isRunning) return sw
+      return {
+        ...sw,
+        isRunning: true,
+        startTime: resumedAt,
+        isCompleted: false,
+      }
+    }))
+    setActiveBreak(null)
+  }, [activeBreak, currentTimeMs])
 
   const breakdown = useMemo(() => {
     return stopwatches.map(sw => {
@@ -169,6 +258,41 @@ function App(): React.JSX.Element {
     if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
     if (minutes > 0) return `${minutes}m ${seconds}s`
     return `${seconds}s`
+  }
+
+  const handlePomodoroComplete = (id: string) => {
+    const now = Date.now()
+    setStopwatches((prev) => prev.map((sw) => {
+      if (sw.id !== id || !sw.isRunning) return sw
+      return completeRunningSession(sw, now)
+    }))
+    setRestStartTime(null)
+    localStorage.removeItem('wyd-rest-start')
+    setActiveBreak({ taskId: id, endsAt: now + breakDurationMs })
+  }
+
+  const startStudySession = () => {
+    if (isStudySessionActive) return
+    setIsStudySessionActive(true)
+    localStorage.setItem('wyd-study-session-active', 'true')
+    if (!isTimerRunning) {
+      const now = Date.now()
+      setRestStartTime(now)
+      localStorage.setItem('wyd-rest-start', now.toString())
+    }
+  }
+
+  const stopStudySession = () => {
+    const now = Date.now()
+    setStopwatches((prev) => prev.map((sw) => {
+      if (!sw.isRunning) return sw
+      return completeRunningSession(sw, now)
+    }))
+    setIsStudySessionActive(false)
+    localStorage.setItem('wyd-study-session-active', 'false')
+    setActiveBreak(null)
+    setRestStartTime(null)
+    localStorage.removeItem('wyd-rest-start')
   }
 
   const addStopwatch = (e: React.FormEvent) => {
@@ -194,37 +318,29 @@ function App(): React.JSX.Element {
       if (targetRunning === undefined) return prev
 
       const now = Date.now()
-      const todayDate = new Date().toISOString().split('T')[0]
 
       return prev.map(sw => {
         if (sw.id === id) {
           if (sw.isRunning) {
-            // Stopping this timer, start resting
-            setRestStartTime(now)
-            localStorage.setItem('wyd-rest-start', now.toString())
-            
-            const addedTime = sw.startTime ? now - sw.startTime : 0
-            const currentSessions = sw.sessions || []
-            const todaySessionIndex = currentSessions.findIndex(s => s.date === todayDate)
-            let newSessions = [...currentSessions]
-
-            if (todaySessionIndex >= 0) {
-              newSessions[todaySessionIndex] = { ...newSessions[todaySessionIndex], durationMs: newSessions[todaySessionIndex].durationMs + addedTime }
+            // Stopping this timer, rest only if an explicit study session is active
+            if (isStudySessionActive) {
+              setRestStartTime(now)
+              localStorage.setItem('wyd-rest-start', now.toString())
             } else {
-              newSessions.push({ date: todayDate, durationMs: addedTime })
+              setRestStartTime(null)
+              localStorage.removeItem('wyd-rest-start')
             }
 
-            return {
-              ...sw,
-              isRunning: false,
-              startTime: null,
-              accumulatedTime: sw.accumulatedTime + addedTime,
-              sessions: newSessions
-            }
+            return completeRunningSession(sw, now)
           } else {
-            // Starting this timer, stop resting
+            // Starting a timer auto-starts study session and pauses resting state
+            if (!isStudySessionActive) {
+              setIsStudySessionActive(true)
+              localStorage.setItem('wyd-study-session-active', 'true')
+            }
             setRestStartTime(null)
             localStorage.removeItem('wyd-rest-start')
+            setActiveBreak(null)
             return {
               ...sw,
               isRunning: true,
@@ -238,24 +354,7 @@ function App(): React.JSX.Element {
             setRestStartTime(null)
             localStorage.removeItem('wyd-rest-start')
 
-            const addedTime = sw.startTime ? now - sw.startTime : 0
-            const currentSessions = sw.sessions || []
-            const todaySessionIndex = currentSessions.findIndex(s => s.date === todayDate)
-            let newSessions = [...currentSessions]
-
-            if (todaySessionIndex >= 0) {
-              newSessions[todaySessionIndex] = { ...newSessions[todaySessionIndex], durationMs: newSessions[todaySessionIndex].durationMs + addedTime }
-            } else {
-              newSessions.push({ date: todayDate, durationMs: addedTime })
-            }
-
-            return {
-              ...sw,
-              isRunning: false,
-              startTime: null,
-              accumulatedTime: sw.accumulatedTime + addedTime,
-              sessions: newSessions
-            }
+            return completeRunningSession(sw, now)
           }
           return sw
         }
@@ -264,13 +363,20 @@ function App(): React.JSX.Element {
   }
 
   const resetStopwatch = (id: string) => {
+    const todayDate = localDateKeyFromMs(Date.now())
     setStopwatches(prev => prev.map(sw => {
       if (sw.id !== id) return sw
       return {
         ...sw,
         isRunning: false,
         startTime: null,
-        accumulatedTime: 0
+        accumulatedTime: 0,
+        sessions: (sw.sessions || []).filter(s => {
+          const sessionDate = s.startedAtIso
+            ? localDateKeyFromMs(new Date(s.startedAtIso).getTime())
+            : s.date
+          return sessionDate !== todayDate
+        })
       }
     }))
   }
@@ -344,7 +450,32 @@ function App(): React.JSX.Element {
         <div className="flex justify-between items-end">
           <div className="flex flex-col gap-1">
             <div className="text-[10px] text-muted-foreground/80 font-semibold uppercase tracking-widest leading-none mb-0.5">Studied Today</div>
-            {restStartTime && !isTimerRunning && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant={isStudySessionActive ? 'secondary' : 'outline'}
+                size="sm"
+                className="h-5 px-2 text-[10px]"
+                onClick={startStudySession}
+                disabled={isStudySessionActive}
+              >
+                Start Session
+              </Button>
+              <Button
+                variant={isStudySessionActive ? 'outline' : 'ghost'}
+                size="sm"
+                className="h-5 px-2 text-[10px]"
+                onClick={stopStudySession}
+                disabled={!isStudySessionActive && !isTimerRunning}
+              >
+                Stop Session
+              </Button>
+            </div>
+            {activeBreak && (
+              <div className="text-[10px] text-blue-500/80 font-medium leading-none">
+                Break: {formatTotalTime(Math.max(0, activeBreak.endsAt - currentTimeMs))}
+              </div>
+            )}
+            {!activeBreak && restStartTime && !isTimerRunning && (
               <div className="text-[10px] text-amber-500/80 font-medium leading-none">
                 Resting: {formatTotalTime(currentTimeMs - restStartTime)}
               </div>
@@ -361,6 +492,41 @@ function App(): React.JSX.Element {
             <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => invoke('open_stats')} title="Stats">
               <BarChart3 className="h-3.5 w-3.5" />
             </Button>
+            {user && (
+              <div className="flex items-center gap-1">
+                {syncState === 'offline' && (
+                  <span title="Offline">
+                    <CloudOff className="h-3.5 w-3.5 text-muted-foreground" />
+                  </span>
+                )}
+                {syncState === 'syncing' && (
+                  <span title="Syncing">
+                    <RefreshCw className="h-3.5 w-3.5 text-blue-500 animate-spin" />
+                  </span>
+                )}
+                {syncState === 'synced' && (
+                  <span title="Synced">
+                    <Cloud className="h-3.5 w-3.5 text-emerald-500" />
+                  </span>
+                )}
+                {syncState === 'error' && (
+                  <span title={syncError || 'Sync failed'}>
+                    <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                  </span>
+                )}
+                {(syncState === 'error' || syncState === 'offline') && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                    onClick={retrySync}
+                    title="Retry sync"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            )}
             {user && (
               <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={logOut} title={`Sign out (${user.email})`}>
                 <LogOut className="h-3.5 w-3.5" />
@@ -422,6 +588,48 @@ function App(): React.JSX.Element {
               />
               <span className="text-muted-foreground text-xs">hours</span>
             </div>
+          </div>
+
+          <div className="space-y-2 pt-3 border-t">
+            <h3 className="font-medium text-sm text-foreground">Timer Durations</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Pomodoro (minutes)</label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={Math.round(pomodoroDurationMs / 60000)}
+                  onChange={(e) => {
+                    const minutes = Number(e.target.value)
+                    if (!Number.isFinite(minutes) || minutes <= 0) return
+                    const newDuration = minutes * 60000
+                    setPomodoroDurationMs(newDuration)
+                    localStorage.setItem('wyd-pomodoro-duration-ms', newDuration.toString())
+                  }}
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Break (minutes)</label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={Math.round(breakDurationMs / 60000)}
+                  onChange={(e) => {
+                    const minutes = Number(e.target.value)
+                    if (!Number.isFinite(minutes) || minutes <= 0) return
+                    const newDuration = minutes * 60000
+                    setBreakDurationMs(newDuration)
+                    localStorage.setItem('wyd-break-duration-ms', newDuration.toString())
+                  }}
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-relaxed">Pomodoro and break durations are saved locally.</p>
           </div>
           
           <div className="space-y-2 pt-3 border-t">
@@ -486,7 +694,9 @@ function App(): React.JSX.Element {
                 <StopwatchItem
                   key={sw.id}
                   stopwatch={sw}
+                  pomodoroDurationMs={pomodoroDurationMs}
                   onToggle={toggleStopwatch}
+                  onPomodoroComplete={handlePomodoroComplete}
                   onReset={resetStopwatch}
                   onDelete={deleteStopwatch}
                   onEditTime={editTime}

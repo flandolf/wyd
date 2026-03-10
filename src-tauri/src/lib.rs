@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -9,6 +10,8 @@ use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent}
 pub struct StopwatchSession {
     pub date: String,
     pub duration_ms: u64,
+    pub started_at_iso: Option<String>,
+    pub ended_at_iso: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -64,7 +67,7 @@ fn open_stats(app: AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("index.html#stats".into())
     )
     .title("Stats")
-    .inner_size(800.0, 600.0)
+    .inner_size(860.0, 700.0)
     .build()
     .map_err(|e| e.to_string())?;
     
@@ -82,6 +85,12 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .show_menu_on_left_click(false)
+                .menu(
+                    &MenuBuilder::new(app)
+                        .item(&MenuItemBuilder::with_id("quit", "Quit").build(app)?)
+                        .build()?,
+                )
                 .on_tray_icon_event(|tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
                     if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
@@ -100,6 +109,11 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                         }
+                    }
+                })
+                .on_menu_event(|app, event| {
+                    if event.id().as_ref() == "quit" {
+                        app.exit(0);
                     }
                 })
                 .build(app)?;

@@ -3,19 +3,79 @@ import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGri
 import { invoke } from '@tauri-apps/api/core'
 import { StopwatchData } from '../StopwatchItem'
 
+function localDateKeyFromDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function localDateKeyFromSession(session: { startedAtIso?: string, date: string }): string {
+  if (session.startedAtIso) {
+    return localDateKeyFromDate(new Date(session.startedAtIso))
+  }
+  return session.date
+}
+
 export function Stats() {
   const [data, setData] = useState<StopwatchData[]>([])
 
   useEffect(() => {
+    let isActive = true
+
+    const applyFromStorage = (raw: string | null): boolean => {
+      if (!raw) return false
+      try {
+        const parsed = JSON.parse(raw) as StopwatchData[]
+        if (Array.isArray(parsed)) {
+          setData(parsed)
+          return true
+        }
+      } catch {
+        // Ignore malformed localStorage payload and fallback to invoke.
+      }
+      return false
+    }
+
     const fetchData = async () => {
+      const usedStorage = applyFromStorage(localStorage.getItem('wyd-stopwatches'))
+      if (usedStorage || !isActive) return
+
       const saved = await invoke<StopwatchData[]>('load_data')
-      if (saved) {
+      if (isActive && Array.isArray(saved)) {
         setData(saved)
       }
     }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'wyd-stopwatches') {
+        applyFromStorage(event.newValue)
+      }
+    }
+
+    const onDataUpdated = () => {
+      applyFromStorage(localStorage.getItem('wyd-stopwatches'))
+    }
+
+    const onVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData()
+      }
+    }
+
     fetchData()
-    const interval = setInterval(fetchData, 5000) // refresh every 5s
-    return () => clearInterval(interval)
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('focus', onVisibilityOrFocus)
+    window.addEventListener('wyd:data-updated', onDataUpdated)
+    document.addEventListener('visibilitychange', onVisibilityOrFocus)
+
+    return () => {
+      isActive = false
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('focus', onVisibilityOrFocus)
+      window.removeEventListener('wyd:data-updated', onDataUpdated)
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus)
+    }
   }, [])
 
   // Derived Data
@@ -24,10 +84,11 @@ export function Stats() {
     data.forEach(sw => {
       if (sw.sessions) {
         sw.sessions.forEach(session => {
-          if (!datesMap[session.date]) {
-            datesMap[session.date] = { date: session.date, totalMs: 0 }
+          const sessionDate = localDateKeyFromSession(session)
+          if (!datesMap[sessionDate]) {
+            datesMap[sessionDate] = { date: sessionDate, totalMs: 0 }
           }
-          datesMap[session.date].totalMs += session.durationMs
+          datesMap[sessionDate].totalMs += session.durationMs
         })
       }
     })
@@ -44,11 +105,18 @@ export function Stats() {
 
   const subjectData = useMemo(() => {
     return data
-      .filter(sw => sw.accumulatedTime > 0)
+      .map(sw => {
+        const totalFromSessions = (sw.sessions || []).reduce((acc, session) => acc + session.durationMs, 0)
+        return {
+          ...sw,
+          totalTrackedMs: totalFromSessions > 0 ? totalFromSessions : sw.accumulatedTime,
+        }
+      })
+      .filter(sw => sw.totalTrackedMs > 0)
       .map(sw => ({
         name: sw.title,
-        value: sw.accumulatedTime,
-        hours: Number((sw.accumulatedTime / (1000 * 60 * 60)).toFixed(2)),
+        value: sw.totalTrackedMs,
+        hours: Number((sw.totalTrackedMs / (1000 * 60 * 60)).toFixed(2)),
         color: sw.color || '#22c55e'
       }))
       .sort((a, b) => b.value - a.value)
@@ -59,7 +127,8 @@ export function Stats() {
     data.forEach(sw => {
       if (sw.sessions) {
         sw.sessions.forEach(session => {
-          datesMap[session.date] = (datesMap[session.date] || 0) + session.durationMs
+          const sessionDate = localDateKeyFromSession(session)
+          datesMap[sessionDate] = (datesMap[sessionDate] || 0) + session.durationMs
         })
       }
     })
@@ -83,7 +152,9 @@ export function Stats() {
 
   const totalHoursEver = (totalTimeEverMs / (1000 * 60 * 60)).toFixed(1)
 
-  const totalTimeTodayMs = dailyData.length > 0 && dailyData[dailyData.length - 1].date === new Date().toISOString().split('T')[0]
+  const todayDateKey = localDateKeyFromDate(new Date())
+
+  const totalTimeTodayMs = dailyData.length > 0 && dailyData[dailyData.length - 1].date === todayDateKey
     ? dailyData[dailyData.length - 1].totalMs : 0
   const totalHoursToday = (totalTimeTodayMs / (1000 * 60 * 60)).toFixed(1)
 
@@ -97,7 +168,7 @@ export function Stats() {
 
         <div className="grid grid-cols-2 gap-4 mb-8">
         <div className="p-4 rounded-xl border bg-card shadow-sm">
-          <div className="text-sm font-medium text-muted-foreground mb-1">Total Study Time</div>
+          <div className="text-sm font-medium text-muted-foreground mb-1">All-Time Logged</div>
           <div className="text-3xl font-bold">{totalHoursEver} <span className="text-sm font-normal text-muted-foreground">hrs</span></div>
         </div>
         <div className="p-4 rounded-xl border bg-card shadow-sm">

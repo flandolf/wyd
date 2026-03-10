@@ -7,6 +7,8 @@ import { cn } from "../lib/utils"
 export interface StopwatchSession {
   date: string // YYYY-MM-DD
   durationMs: number
+  startedAtIso?: string
+  endedAtIso?: string
 }
 
 export interface StopwatchData {
@@ -23,24 +25,38 @@ export interface StopwatchData {
 
 interface StopwatchItemProps {
   stopwatch: StopwatchData
+  pomodoroDurationMs: number
   onToggle: (id: string) => void
   onReset: (id: string) => void
   onDelete: (id: string) => void
   onEditTime: (id: string, msDelta: number) => void
   onTogglePomodoro: (id: string) => void
+  onPomodoroComplete?: (id: string) => void
   onToggleComplete?: (id: string) => void
   onDragStart?: () => void
   onDragOver?: (e: React.DragEvent) => void
   onDrop?: () => void
 }
 
-export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTime, onTogglePomodoro, onToggleComplete }: StopwatchItemProps) {
+export function StopwatchItem({ stopwatch, pomodoroDurationMs, onToggle, onReset, onDelete, onEditTime, onTogglePomodoro, onPomodoroComplete, onToggleComplete }: StopwatchItemProps) {
   const [displayTime, setDisplayTime] = useState(stopwatch.accumulatedTime)
   const [isEditingTime, setIsEditingTime] = useState(false)
   const [editMinutes, setEditMinutes] = useState(0)
 
-  // 25 minutes in milliseconds
-  const POMODORO_DUR = 25 * 60 * 1000
+  const notifyPomodoroComplete = () => {
+    if (typeof window === "undefined" || !("Notification" in window)) return
+    if (Notification.permission === "granted") {
+      new window.Notification("Pomodoro Complete", { body: "Time for a break!" })
+      return
+    }
+    if (Notification.permission === "default") {
+      Notification.requestPermission().then((permission) => {
+        if (permission === "granted") {
+          new window.Notification("Pomodoro Complete", { body: "Time for a break!" })
+        }
+      })
+    }
+  }
 
   useEffect(() => {
     let animationFrameId: number
@@ -48,10 +64,11 @@ export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTi
     const updateTime = () => {
       if (stopwatch.isRunning && stopwatch.startTime !== null) {
         let elapsed = stopwatch.accumulatedTime + (Date.now() - stopwatch.startTime)
-        if (stopwatch.isPomodoro && elapsed >= POMODORO_DUR) {
-          elapsed = POMODORO_DUR
-          new window.Notification("Pomodoro Complete", { body: "Time for a break!" })
-          onToggle(stopwatch.id) // stop the timer
+        if (stopwatch.isPomodoro && elapsed >= pomodoroDurationMs) {
+          elapsed = pomodoroDurationMs
+          notifyPomodoroComplete()
+          if (onPomodoroComplete) onPomodoroComplete(stopwatch.id)
+          else onToggle(stopwatch.id)
         }
         setDisplayTime(elapsed)
         if (stopwatch.isRunning) {
@@ -67,12 +84,12 @@ export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTi
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId)
     }
-  }, [stopwatch.isRunning, stopwatch.startTime, stopwatch.accumulatedTime, stopwatch.isPomodoro, onToggle])
+  }, [stopwatch.isRunning, stopwatch.startTime, stopwatch.accumulatedTime, stopwatch.isPomodoro, pomodoroDurationMs, onToggle, onPomodoroComplete, stopwatch.id])
 
   const formatTime = (ms: number) => {
     let targetMs = ms
     if (stopwatch.isPomodoro) {
-      targetMs = Math.max(0, POMODORO_DUR - ms)
+      targetMs = Math.max(0, pomodoroDurationMs - ms)
     }
 
     const totalSeconds = Math.floor(targetMs / 1000)
@@ -115,7 +132,17 @@ export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTi
           </div>
         </div>
 
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity focus-within:opacity-100">
+        <div className="flex items-center gap-0.5 opacity-100">
+          <Button
+            variant={stopwatch.isRunning ? "secondary" : "ghost"}
+            size="icon"
+            className="h-8 w-8 rounded-full"
+            onClick={() => onToggle(stopwatch.id)}
+            title={stopwatch.isRunning ? "Pause" : "Start"}
+          >
+            {stopwatch.isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
+          </Button>
+
           <Button
             variant="ghost"
             size="icon"
@@ -154,17 +181,6 @@ export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTi
           >
             <X className="h-3.5 w-3.5" />
           </Button>
-        </div>
-        {/* Show play button always if mobile? assuming toggle on hover for efficiency */}
-        <div className="md:hidden flex items-center gap-1">
-            <Button
-              variant={stopwatch.isRunning ? "secondary" : "ghost"}
-              size="icon"
-              className="h-7 w-7 rounded-full"
-              onClick={() => onToggle(stopwatch.id)}
-            >
-             {stopwatch.isRunning ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ml-0.5" />}
-            </Button>
         </div>
       </div>
       {isEditingTime && (
