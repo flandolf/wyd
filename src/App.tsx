@@ -1,8 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
-import { Plus, Timer, BarChart3, Download, Upload } from "lucide-react"
+import { Plus, Timer, BarChart3, Download, Upload, Settings, LogOut } from "lucide-react"
 import { StopwatchItem, type StopwatchData } from "./components/StopwatchItem"
+import { useAuth } from "./components/AuthProvider"
+import { useFirebaseSync } from "./hooks/useFirebaseSync"
 
 const PRESET_COLORS = [
   '#ef4444', // red
@@ -22,10 +25,27 @@ function App(): React.JSX.Element {
   const [newTitle, setNewTitle] = useState("")
   const [selectedColor, setSelectedColor] = useState(PRESET_COLORS[3])
   const [currentTimeMs, setCurrentTimeMs] = useState(Date.now())
+  const [restStartTime, setRestStartTime] = useState<number | null>(null)
+  const [dailyGoalMs, setDailyGoalMs] = useState(4 * 60 * 60 * 1000) // Default 4 hours
+  const [showSettings, setShowSettings] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const { user, signInEmail, signUpEmail, logOut } = useAuth()
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [isSignUp, setIsSignUp] = useState(false)
+
+  const handleRemoteUpdate = useCallback((data: StopwatchData[]) => {
+    setStopwatches(data)
+  }, [])
+
+  useFirebaseSync(user, stopwatches, isLoaded, handleRemoteUpdate)
 
   useEffect(() => {
-    window.api.loadData().then(saved => {
+    const savedGoal = localStorage.getItem('wyd-daily-goal')
+    if (savedGoal) setDailyGoalMs(Number(savedGoal))
+
+    invoke<StopwatchData[]>('load_data').then(saved => {
       let loadedData = []
       if (saved && saved.length > 0) {
         loadedData = saved
@@ -42,19 +62,30 @@ function App(): React.JSX.Element {
           ...sw,
           accumulatedTime: 0,
           isRunning: false,
-          startTime: null
+          startTime: null,
+          isCompleted: false
         }))
       }
 
       localStorage.setItem('wyd-last-active-date', todayDate)
       setStopwatches(loadedData)
       setIsLoaded(true)
+      
+      const isAnyRunning = loadedData.some((sw: StopwatchData) => sw.isRunning)
+      if (!isAnyRunning) {
+        const savedRestStart = localStorage.getItem('wyd-rest-start')
+        if (savedRestStart) setRestStartTime(Number(savedRestStart))
+        else {
+          setRestStartTime(Date.now())
+          localStorage.setItem('wyd-rest-start', Date.now().toString())
+        }
+      }
     })
   }, [])
 
   useEffect(() => {
     if (isLoaded) {
-      window.api.saveData(stopwatches)
+      invoke('save_data', { data: stopwatches })
       localStorage.setItem('wyd-stopwatches', JSON.stringify(stopwatches))
       localStorage.setItem('wyd-last-active-date', new Date().toISOString().split('T')[0])
     }
@@ -106,7 +137,7 @@ function App(): React.JSX.Element {
   const isTimerRunning = stopwatches.some(sw => sw.isRunning)
 
   useEffect(() => {
-    if (!isTimerRunning) {
+    if (!isTimerRunning && !restStartTime) {
       setCurrentTimeMs(Date.now())
       return
     }
@@ -119,7 +150,7 @@ function App(): React.JSX.Element {
 
     updateTime()
     return () => cancelAnimationFrame(animationFrameId)
-  }, [isTimerRunning])
+  }, [isTimerRunning, restStartTime])
 
   const breakdown = useMemo(() => {
     return stopwatches.map(sw => {
@@ -168,6 +199,10 @@ function App(): React.JSX.Element {
       return prev.map(sw => {
         if (sw.id === id) {
           if (sw.isRunning) {
+            // Stopping this timer, start resting
+            setRestStartTime(now)
+            localStorage.setItem('wyd-rest-start', now.toString())
+            
             const addedTime = sw.startTime ? now - sw.startTime : 0
             const currentSessions = sw.sessions || []
             const todaySessionIndex = currentSessions.findIndex(s => s.date === todayDate)
@@ -187,15 +222,22 @@ function App(): React.JSX.Element {
               sessions: newSessions
             }
           } else {
+            // Starting this timer, stop resting
+            setRestStartTime(null)
+            localStorage.removeItem('wyd-rest-start')
             return {
               ...sw,
               isRunning: true,
-              startTime: now
+              startTime: now,
+              isCompleted: false
             }
           }
         } else {
           // If we are starting the target stopwatch, stop any other running ones
           if (!targetRunning && sw.isRunning) {
+            setRestStartTime(null)
+            localStorage.removeItem('wyd-rest-start')
+
             const addedTime = sw.startTime ? now - sw.startTime : 0
             const currentSessions = sw.sessions || []
             const todaySessionIndex = currentSessions.findIndex(s => s.date === todayDate)
@@ -252,6 +294,17 @@ function App(): React.JSX.Element {
     }))
   }
 
+  const toggleComplete = (id: string) => {
+    setStopwatches(prev => prev.map(sw => {
+      if (sw.id !== id) return sw
+      if (sw.isRunning) {
+        // Stop timer when marked complete
+        toggleStopwatch(id)
+      }
+      return { ...sw, isCompleted: !sw.isCompleted }
+    }))
+  }
+
   const handleDragStart = (id: string) => {
     setDraggedItemId(id)
   }
@@ -289,7 +342,14 @@ function App(): React.JSX.Element {
     <div className="p-2 h-screen flex flex-col bg-background text-foreground overflow-hidden">
       <div className="mb-3 px-1 space-y-1.5 shrink-0">
         <div className="flex justify-between items-end">
-          <div className="text-[10px] text-muted-foreground/80 font-semibold uppercase tracking-widest leading-none mb-0.5">Studied Today</div>
+          <div className="flex flex-col gap-1">
+            <div className="text-[10px] text-muted-foreground/80 font-semibold uppercase tracking-widest leading-none mb-0.5">Studied Today</div>
+            {restStartTime && !isTimerRunning && (
+              <div className="text-[10px] text-amber-500/80 font-medium leading-none">
+                Resting: {formatTotalTime(currentTimeMs - restStartTime)}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <input
               type="file"
@@ -298,87 +358,175 @@ function App(): React.JSX.Element {
               ref={fileInputRef}
               onChange={importFromJson}
             />
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => fileInputRef.current?.click()} title="Import JSON">
-              <Upload className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={exportToJson} title="Export to JSON">
-              <Download className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => window.api.openStats()}>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={() => invoke('open_stats')} title="Stats">
               <BarChart3 className="h-3.5 w-3.5" />
             </Button>
-            <div className="text-sm font-bold tabular-nums tracking-wide leading-none">{formatTotalTime(totalTime)}</div>
+            {user && (
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground" onClick={logOut} title={`Sign out (${user.email})`}>
+                <LogOut className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" className={`h-5 w-5 ${showSettings ? 'text-foreground' : 'text-muted-foreground'} hover:text-foreground`} onClick={() => setShowSettings(!showSettings)} title="Settings">
+              <Settings className="h-3.5 w-3.5" />
+            </Button>
+            <div className="flex flex-col items-end">
+              <div className="text-sm font-bold tabular-nums tracking-wide leading-none">{formatTotalTime(totalTime)}</div>
+              <div className="text-[9px] text-muted-foreground mt-0.5">/ {formatTotalTime(dailyGoalMs)}</div>
+            </div>
           </div>
         </div>
 
         {totalTime > 0 ? (
-          <div className="flex w-full h-2 rounded-full overflow-hidden bg-muted/50 border border-muted">
-            {breakdown.map(sw => (
-              <div
-                key={sw.id}
-                className="transition-all duration-300 ease-linear"
-                style={{
-                  width: `${(sw.current / totalTime) * 100}%`,
-                  backgroundColor: sw.color || '#22c55e'
-                }}
-              onDragStart={() => handleDragStart(sw.id)}
-              onDragOver={handleDragOver}
-              onDrop={() => handleDrop(sw.id)}
-                title={`${sw.title}: ${formatTotalTime(sw.current)}`}
-              />
-            ))}
+          <div className="flex flex-col gap-1 w-full">
+            <div className="flex w-full h-2 rounded-full overflow-hidden bg-muted/50 border border-muted">
+              {breakdown.map(sw => (
+                <div
+                  key={sw.id}
+                  className="transition-all duration-300 ease-linear"
+                  style={{
+                    width: `${(sw.current / Math.max(totalTime, dailyGoalMs)) * 100}%`,
+                    backgroundColor: sw.color || '#22c55e'
+                  }}
+                  onDragStart={() => handleDragStart(sw.id)}
+                  onDragOver={handleDragOver}
+                  onDrop={() => handleDrop(sw.id)}
+                  title={`${sw.title}: ${formatTotalTime(sw.current)}`}
+                />
+              ))}
+            </div>
+            {totalTime > dailyGoalMs && (
+              <div className="text-[10px] text-primary self-end font-medium">Goal Reached! 🎉</div>
+            )}
           </div>
         ) : (
           <div className="w-full h-2 rounded-full bg-muted/50 border border-muted" />
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-1 -mr-1">
-        {stopwatches.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground opacity-50 space-y-1">
-            <Timer className="w-6 h-6" />
-            <p className="text-[10px] font-medium">No timers</p>
+      {showSettings ? (
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-5 p-3 mt-1 bg-muted/30 rounded-lg border">
+          <div className="space-y-2">
+            <h3 className="font-medium text-sm text-foreground">Daily Goal</h3>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={dailyGoalMs / 3600000}
+                onChange={(e) => {
+                  const newGoal = Number(e.target.value) * 3600000
+                  setDailyGoalMs(newGoal)
+                  localStorage.setItem('wyd-daily-goal', newGoal.toString())
+                }}
+                className="w-20 h-8 text-xs bg-background"
+              />
+              <span className="text-muted-foreground text-xs">hours</span>
+            </div>
           </div>
-        ) : (
-          stopwatches.map(sw => (
-            <StopwatchItem
-              key={sw.id}
-              stopwatch={sw}
-              onToggle={toggleStopwatch}
-              onReset={resetStopwatch}
-              onDelete={deleteStopwatch}
-              onEditTime={editTime}
-              onTogglePomodoro={togglePomodoro}
-            />
-          ))
-        )}
-      </div>
+          
+          <div className="space-y-2 pt-3 border-t">
+            <h3 className="font-medium text-sm text-foreground">Account</h3>
+            {user ? (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                <Button variant="outline" size="sm" className="text-xs h-7 shrink-0" onClick={logOut}>Sign out</Button>
+              </div>
+            ) : (
+              <form onSubmit={async (e) => {
+                e.preventDefault()
+                setAuthError('')
+                try {
+                  if (isSignUp) await signUpEmail(authEmail, authPassword)
+                  else await signInEmail(authEmail, authPassword)
+                  setAuthEmail('')
+                  setAuthPassword('')
+                } catch (err: unknown) {
+                  setAuthError(err instanceof Error ? err.message.replace('Firebase: ', '') : 'Auth failed')
+                }
+              }} className="space-y-1.5">
+                <Input type="email" placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="h-8 text-xs bg-background" required />
+                <Input type="password" placeholder="Password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="h-8 text-xs bg-background" required minLength={6} />
+                {authError && <p className="text-[10px] text-destructive">{authError}</p>}
+                <div className="flex gap-2">
+                  <Button type="submit" size="sm" className="flex-1 text-xs h-8">{isSignUp ? 'Sign up' : 'Sign in'}</Button>
+                </div>
+                <button type="button" onClick={() => { setIsSignUp(!isSignUp); setAuthError('') }} className="text-[10px] text-muted-foreground hover:text-foreground w-full text-center">
+                  {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+                </button>
+              </form>
+            )}
+            <p className="text-[10px] text-muted-foreground leading-relaxed">Sign in to sync data across devices.</p>
+          </div>
 
-      <div className="mt-2 pt-2 border-t bg-background shrink-0 z-10 flex flex-col gap-2.5">
-        <form onSubmit={addStopwatch} className="flex gap-1.5">
-          <Input
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="New task..."
-            className="h-7 text-xs px-2 focus-visible:ring-1"
-            autoFocus={stopwatches.length === 0}
-          />
-          <Button type="submit" size="sm" className="h-7 w-7 p-0 shrink-0" variant="secondary" disabled={!newTitle.trim()}>
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </form>
-        <div className="flex items-center justify-between px-1 mb-0.5">
-          {PRESET_COLORS.map(color => (
-            <button
-              key={color}
-              type="button"
-              onClick={() => setSelectedColor(color)}
-              className={`w-3.5 h-3.5 rounded-full transition-all duration-200 ${selectedColor === color ? 'ring-2 ring-primary/80 ring-offset-2 ring-offset-background scale-110 shadow-sm' : 'opacity-60 hover:opacity-100 hover:scale-110'}`}
-              style={{ backgroundColor: color }}
-            />
-          ))}
+          <div className="space-y-2 pt-3 border-t">
+            <h3 className="font-medium text-sm text-foreground">Data Management</h3>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1 text-xs h-8" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                Import
+              </Button>
+              <Button variant="outline" size="sm" className="flex-1 text-xs h-8" onClick={exportToJson}>
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Export
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-relaxed">Importing will merge with existing tasks. Exporting saves all data as JSON.</p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-1 -mr-1">
+            {stopwatches.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground opacity-50 space-y-1">
+                <Timer className="w-6 h-6" />
+                <p className="text-[10px] font-medium">No timers</p>
+              </div>
+            ) : (
+              stopwatches.map(sw => (
+                <StopwatchItem
+                  key={sw.id}
+                  stopwatch={sw}
+                  onToggle={toggleStopwatch}
+                  onReset={resetStopwatch}
+                  onDelete={deleteStopwatch}
+                  onEditTime={editTime}
+                  onTogglePomodoro={togglePomodoro}
+                  onToggleComplete={toggleComplete}
+                  onDragStart={() => handleDragStart(sw.id)}
+                  onDragOver={handleDragOver}
+                  onDrop={() => handleDrop(sw.id)}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="mt-2 pt-2 border-t bg-background shrink-0 z-10 flex flex-col gap-2.5">
+            <form onSubmit={addStopwatch} className="flex gap-1.5">
+              <Input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="New task..."
+                className="h-7 text-xs px-2 focus-visible:ring-1"
+                autoFocus={stopwatches.length === 0}
+              />
+              <Button type="submit" size="sm" className="h-7 w-7 p-0 shrink-0" variant="secondary" disabled={!newTitle.trim()}>
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </form>
+            <div className="flex items-center justify-between px-1 mb-0.5">
+              {PRESET_COLORS.map(color => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => setSelectedColor(color)}
+                  className={`w-3.5 h-3.5 rounded-full transition-all duration-200 ${selectedColor === color ? 'ring-2 ring-primary/80 ring-offset-2 ring-offset-background scale-110 shadow-sm' : 'opacity-60 hover:opacity-100 hover:scale-110'}`}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

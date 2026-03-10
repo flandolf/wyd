@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell } from 'recharts'
+import { invoke } from '@tauri-apps/api/core'
 import { StopwatchData } from '../StopwatchItem'
 
 export function Stats() {
@@ -7,7 +8,7 @@ export function Stats() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const saved = await window.api.loadData()
+      const saved = await invoke<StopwatchData[]>('load_data')
       if (saved) {
         setData(saved)
       }
@@ -53,7 +54,33 @@ export function Stats() {
       .sort((a, b) => b.value - a.value)
   }, [data])
 
+  const heatmapData = useMemo(() => {
+    const datesMap: Record<string, number> = {}
+    data.forEach(sw => {
+      if (sw.sessions) {
+        sw.sessions.forEach(session => {
+          datesMap[session.date] = (datesMap[session.date] || 0) + session.durationMs
+        })
+      }
+    })
+    
+    // Generate last 30 days
+    const days = []
+    const today = new Date()
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today)
+      d.setDate(today.getDate() - i)
+      const dateStr = d.toISOString().split('T')[0]
+      days.push({
+        date: dateStr,
+        totalMs: datesMap[dateStr] || 0
+      })
+    }
+    return days
+  }, [data])
+
   const totalTimeEverMs = subjectData.reduce((acc, curr) => acc + curr.value, 0)
+
   const totalHoursEver = (totalTimeEverMs / (1000 * 60 * 60)).toFixed(1)
 
   const totalTimeTodayMs = dailyData.length > 0 && dailyData[dailyData.length - 1].date === new Date().toISOString().split('T')[0]
@@ -81,7 +108,7 @@ export function Stats() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {/* Daily Bar Chart */}
-        <div className="p-5 rounded-xl border bg-card shadow-sm flex flex-col h-[320px]">
+        <div className="p-5 rounded-xl border bg-card shadow-sm flex flex-col h-80">
           <h2 className="text-sm font-semibold text-muted-foreground mb-4 shrink-0">Study Time Per Day (Last 7 Days)</h2>
           <div className="flex-1 w-full">
             {dailyData.length > 0 ? (
@@ -116,7 +143,7 @@ export function Stats() {
         </div>
 
         {/* Subject Pie Chart */}
-        <div className="p-5 rounded-xl border bg-card shadow-sm flex flex-col h-[320px]">
+        <div className="p-5 rounded-xl border bg-card shadow-sm flex flex-col h-80">
           <h2 className="text-sm font-semibold text-muted-foreground mb-4 shrink-0">Time per Subject</h2>
           <div className="flex-1 w-full">
             {subjectData.length > 0 ? (
@@ -157,6 +184,35 @@ export function Stats() {
           </div>
         </div>
       </div>
+
+      <div className="p-5 rounded-xl border bg-card shadow-sm flex flex-col mb-6">
+        <h2 className="text-sm font-semibold text-muted-foreground mb-4 shrink-0">Activity Map (Last 30 Days)</h2>
+        <div className="flex gap-1.5 flex-wrap">
+          {heatmapData.map((day, i) => {
+            const intensity = day.totalMs === 0 ? 0 : 
+              day.totalMs < 1000 * 60 * 60 ? 1 : // < 1hr
+              day.totalMs < 1000 * 60 * 60 * 3 ? 2 : // < 3hr
+              day.totalMs < 1000 * 60 * 60 * 6 ? 3 : 4 // < 6hr then 6+
+            
+            const bgClass = [
+              'bg-muted', 
+              'bg-emerald-900/40', 
+              'bg-emerald-700/60', 
+              'bg-emerald-500/80', 
+              'bg-emerald-400'
+            ][intensity]
+
+            return (
+              <div 
+                key={i} 
+                className={`w-4 h-4 rounded-sm ${bgClass}`}
+                title={`${day.date}: ${(day.totalMs / (1000 * 60 * 60)).toFixed(1)} hrs`}
+              />
+            )
+          })}
+        </div>
+      </div>
+
     </div>
     </div>
   )

@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react"
 import { Button } from "./ui/button"
-import { Play, Pause, RotateCcw, X, Edit2, Timer as TimerIcon } from "lucide-react"
+import { Play, Pause, RotateCcw, X, Edit2, Timer as TimerIcon, CheckCircle2, Circle } from "lucide-react"
 import { cn } from "../lib/utils"
 
 export interface StopwatchSession {
@@ -18,6 +18,7 @@ export interface StopwatchData {
   color?: string
   sessions?: StopwatchSession[]
   isPomodoro?: boolean
+  isCompleted?: boolean
 }
 
 interface StopwatchItemProps {
@@ -27,12 +28,13 @@ interface StopwatchItemProps {
   onDelete: (id: string) => void
   onEditTime: (id: string, msDelta: number) => void
   onTogglePomodoro: (id: string) => void
+  onToggleComplete?: (id: string) => void
   onDragStart?: () => void
   onDragOver?: (e: React.DragEvent) => void
   onDrop?: () => void
 }
 
-export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTime, onTogglePomodoro, onDragStart, onDragOver, onDrop }: StopwatchItemProps) {
+export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTime, onTogglePomodoro, onToggleComplete }: StopwatchItemProps) {
   const [displayTime, setDisplayTime] = useState(stopwatch.accumulatedTime)
   const [isEditingTime, setIsEditingTime] = useState(false)
   const [editMinutes, setEditMinutes] = useState(0)
@@ -95,15 +97,20 @@ export function StopwatchItem({ stopwatch, onToggle, onReset, onDelete, onEditTi
   }
 
   return (
-    <div className="group flex flex-col p-1.5 pl-2.5 bg-card rounded-md border shadow-sm hover:border-primary/20 transition-all gap-2">
+    <div className={cn("group flex flex-col p-1.5 pl-2.5 bg-card rounded-md border shadow-sm hover:border-primary/20 transition-all gap-2", stopwatch.isCompleted && "opacity-60")}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          {onToggleComplete && (
+            <button onClick={() => onToggleComplete(stopwatch.id)} className="text-muted-foreground hover:text-primary transition-colors focus:outline-none">
+              {stopwatch.isCompleted ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4" />}
+            </button>
+          )}
           <div
             className={cn("size-2 rounded-full transition-all shadow-[0_0_4px_rgba(0,0,0,0.1)]", stopwatch.isRunning ? "animate-pulse" : "opacity-30")}
             style={{ backgroundColor: stopwatch.color || '#22c55e' }}
           />
           <div className="grid gap-px min-w-0">
-            <h3 className="font-medium text-[11px] text-muted-foreground truncate leading-none">{stopwatch.title}</h3>
+            <h3 className={cn("font-medium text-[11px] text-muted-foreground truncate leading-none", stopwatch.isCompleted && "line-through")}>{stopwatch.title}</h3>
             <div className="leading-none text-sm">{formatTime(displayTime)}</div>
           </div>
         </div>
