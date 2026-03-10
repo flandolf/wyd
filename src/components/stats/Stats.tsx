@@ -337,26 +337,26 @@ export function Stats() {
             {dailyData.length > 0 ? (
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={dailyData} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted-foreground)/0.2)" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="color-mix(in oklch, var(--muted-foreground), transparent 80%)" />
                   <XAxis
                     dataKey="label"
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                    tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }}
                     dy={10}
                     minTickGap={20}
                   />
                   <YAxis
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                    tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }}
                   />
                   <Tooltip
-                    cursor={{ fill: 'hsl(var(--muted)/0.5)' }}
-                    contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    cursor={{ fill: 'color-mix(in oklch, var(--muted), transparent 50%)' }}
+                    contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                     formatter={(value: any) => [`${value} hrs`, 'Study Time']}
-                    labelStyle={{ color: 'hsl(var(--foreground))', fontWeight: 'bold', marginBottom: '4px' }}
-                    itemStyle={{ color: 'hsl(var(--foreground))' }}
+                    labelStyle={{ color: 'var(--foreground)', fontWeight: 'bold', marginBottom: '4px' }}
+                    itemStyle={{ color: 'var(--foreground)' }}
                   />
                   <Bar 
                     dataKey="hours" 
@@ -398,8 +398,8 @@ export function Stats() {
                       shape={MyCustomPie}
                     />
                     <Tooltip
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', fontWeight: '500', color: 'hsl(var(--card-foreground))' }}
-                      itemStyle={{ color: 'hsl(var(--foreground))' }}
+                      contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', fontWeight: '500', color: 'var(--card-foreground)' }}
+                      itemStyle={{ color: 'var(--foreground)' }}
                       formatter={(value: any, name: any) => [formatMsToHhMm(value), name]}
                     />
                   </PieChart>
@@ -443,8 +443,8 @@ export function Stats() {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', fontWeight: '500', color: 'hsl(var(--card-foreground))' }}
-                      itemStyle={{ color: 'hsl(var(--foreground))' }}
+                      contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', fontWeight: '500', color: 'var(--card-foreground)' }}
+                      itemStyle={{ color: 'var(--foreground)' }}
                       formatter={(value: any, name: any) => [formatMsToHhMm(value), name]}
                     />
                   </PieChart>
