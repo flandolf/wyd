@@ -1,16 +1,16 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { ref, set, onValue, type Unsubscribe } from 'firebase/database'
 import { db } from '../lib/firebase'
-import type { StopwatchData } from '../components/StopwatchItem'
+import type { SubjectData } from '../components/SubjectItem'
 import type { User } from 'firebase/auth'
 
 export type SyncState = 'idle' | 'syncing' | 'synced' | 'offline' | 'error'
 
 export function useFirebaseSync(
   user: User | null,
-  stopwatches: StopwatchData[],
+  subjects: SubjectData[],
   isLoaded: boolean,
-  onRemoteUpdate: (data: StopwatchData[]) => void,
+  onRemoteUpdate: (data: SubjectData[]) => void,
 ) {
   const isRemoteUpdate = useRef(false)
   const unsubRef = useRef<Unsubscribe | null>(null)
@@ -49,7 +49,7 @@ export function useFirebaseSync(
       return
     }
 
-    const userRef = ref(db, `users/${user.uid}/stopwatches`)
+    const userRef = ref(db, `users/${user.uid}/subjects`)
     unsubRef.current = onValue(userRef, (snapshot) => {
       const data = snapshot.val()
       if (data && Array.isArray(data)) {
@@ -79,17 +79,17 @@ export function useFirebaseSync(
       return
     }
 
-    const userRef = ref(db, `users/${user.uid}/stopwatches`)
+    const userRef = ref(db, `users/${user.uid}/subjects`)
     setSyncState('syncing')
     try {
-      await set(userRef, stopwatches)
+      await set(userRef, subjects)
       setSyncState('synced')
       setSyncError(null)
     } catch (error) {
       setSyncState('error')
       setSyncError(error instanceof Error ? error.message : 'Sync failed')
     }
-  }, [user, stopwatches, isLoaded])
+  }, [user, subjects, isLoaded])
 
   useEffect(() => {
     pushToFirebase()

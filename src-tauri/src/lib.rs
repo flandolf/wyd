@@ -25,6 +25,7 @@ pub struct StopwatchData {
     pub color: Option<String>,
     pub is_pomodoro: Option<bool>,
     pub sessions: Option<Vec<StopwatchSession>>,
+    pub order: Option<u32>,
 }
 
 fn get_data_file_path(app: &AppHandle) -> std::io::Result<PathBuf> {

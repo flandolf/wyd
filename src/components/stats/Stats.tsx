@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
-import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, PieSectorShapeProps, Sector } from 'recharts'
+import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, PieSectorShapeProps, Sector } from 'recharts'
 import { invoke } from '@tauri-apps/api/core'
-import { StopwatchData } from '../StopwatchItem'
+import { SubjectData } from '../SubjectItem'
+import { Flame, Clock, TrendingUp, Calendar } from 'lucide-react'
 
 function localDateKeyFromDate(date: Date): string {
   const year = date.getFullYear()
@@ -25,12 +26,35 @@ function formatMsToHhMm(ms: number) {
   return `${hrs}h ${mins}m`
 }
 
+function calculateStreak(datesMap: Record<string, number>): number {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  let streak = 0
+  let currentDate = new Date(today)
+  
+  while (true) {
+    const dateKey = localDateKeyFromDate(currentDate)
+    if (datesMap[dateKey] && datesMap[dateKey] > 0) {
+      streak++
+      currentDate.setDate(currentDate.getDate() - 1)
+    } else {
+      // Allow for "grace" if today has no data yet (streak counts from yesterday)
+      if (streak === 0 && currentDate.getTime() === today.getTime()) {
+        currentDate.setDate(currentDate.getDate() - 1)
+        continue
+      }
+      break
+    }
+  }
+  return streak
+}
+
 export function Stats() {
-  const [data, setData] = useState<StopwatchData[]>([])
+  const [data, setData] = useState<SubjectData[]>([])
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | 'all'>('7d')
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
-  const MyCustomPie = (props: PieSectorShapeProps) => <Sector {...props} fill={(props.payload as any)?.color} />
+  const PieShape = (props: PieSectorShapeProps) => <Sector {...props} fill={(props.payload as any)?.color} />
 
   useEffect(() => {
     let isActive = true
@@ -38,7 +62,7 @@ export function Stats() {
     const applyFromStorage = (raw: string | null): boolean => {
       if (!raw) return false
       try {
-        const parsed = JSON.parse(raw) as StopwatchData[]
+        const parsed = JSON.parse(raw) as SubjectData[]
         if (Array.isArray(parsed)) {
           setData(parsed)
           return true
@@ -50,20 +74,20 @@ export function Stats() {
     }
 
     const fetchData = async () => {
-      const usedStorage = applyFromStorage(localStorage.getItem('wyd-stopwatches'))
+      const usedStorage = applyFromStorage(localStorage.getItem('wyd-subjects'))
       if (usedStorage || !isActive) return
 
-      const saved = await invoke<StopwatchData[]>('load_data')
+      const saved = await invoke<SubjectData[]>('load_data')
       if (isActive && Array.isArray(saved)) {
         setData(saved)
       }
     }
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === 'wyd-stopwatches') applyFromStorage(event.newValue)
+      if (event.key === 'wyd-subjects') applyFromStorage(event.newValue)
     }
 
-    const onDataUpdated = () => applyFromStorage(localStorage.getItem('wyd-stopwatches'))
+    const onDataUpdated = () => applyFromStorage(localStorage.getItem('wyd-subjects'))
     const onVisibilityOrFocus = () => { if (document.visibilityState === 'visible') fetchData() }
 
     fetchData()
@@ -197,8 +221,8 @@ export function Stats() {
     return { dailyData: formattedDaily, subjectData: formattedSubject, timeOfDayData: formattedTod }
   }, [data, timeRange, rangeStartTimeMs, todayDateKey, selectedDate])
 
-  // All time and Heatmap Data
-  const heatmapData = useMemo(() => {
+  // All time dates map for streak and heatmap
+  const allTimeDatesMap = useMemo(() => {
     const datesMap: Record<string, number> = {}
     data.forEach(sw => {
       if (sw.sessions) {
@@ -213,17 +237,23 @@ export function Stats() {
         datesMap[todayDateKey] = (datesMap[todayDateKey] || 0) + (sw.accumulatedTime - todaySessionsSum)
       }
     })
+    return datesMap
+  }, [data, todayDateKey])
 
+  const studyStreak = useMemo(() => calculateStreak(allTimeDatesMap), [allTimeDatesMap])
+
+  // Heatmap Data
+  const heatmapData = useMemo(() => {
     const days = []
     const today = new Date()
     for (let i = 29; i >= 0; i--) {
       const d = new Date(today)
       d.setDate(today.getDate() - i)
       const dateStr = localDateKeyFromDate(d)
-      days.push({ date: dateStr, totalMs: datesMap[dateStr] || 0 })
+      days.push({ date: dateStr, totalMs: allTimeDatesMap[dateStr] || 0 })
     }
     return days
-  }, [data, todayDateKey])
+  }, [allTimeDatesMap])
 
   // Totals calculations
   const totalTimeEverMs = Object.values(data).reduce((acc, sw) => {
@@ -231,6 +261,11 @@ export function Stats() {
     return acc + Math.max(fromSessions, sw.accumulatedTime)
   }, 0)
   const totalHoursEver = (totalTimeEverMs / (1000 * 60 * 60)).toFixed(1)
+
+  // Average daily study time (based on days with activity)
+  const activeDaysCount = Object.values(allTimeDatesMap).filter(ms => ms > 0).length
+  const avgDailyMs = activeDaysCount > 0 ? totalTimeEverMs / activeDaysCount : 0
+  const avgDailyHours = (avgDailyMs / (1000 * 60 * 60)).toFixed(1)
 
   const isAnyRunning = data.some(sw => sw.isRunning)
   const [currentTimeMs, setCurrentTimeMs] = useState(Date.now())
@@ -265,7 +300,7 @@ export function Stats() {
     return data.reduce((acc, sw) => {
       const todaySessions = (sw.sessions || []).filter(s => localDateKeyFromSession(s) === todayDateKey)
       const todaySessionsSum = todaySessions.reduce((sum, s) => sum + s.durationMs, 0)
-      return acc + Math.max(todaySessionsSum, sw.accumulatedTime)
+      return acc + todaySessionsSum
     }, 0)
   }, [data, todayDateKey])
 
@@ -312,18 +347,46 @@ export function Stats() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-6 mb-8">
-          <div className="p-6 rounded-2xl border bg-card/50 shadow-sm flex flex-col justify-center items-start">
-            <div className="text-sm font-semibold text-muted-foreground mb-1 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500"></div> All-Time Logged
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="p-5 rounded-2xl border bg-linear-to-br from-blue-500/10 to-transparent shadow-sm flex flex-col justify-between">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-2 rounded-lg bg-blue-500/20">
+                <Clock className="w-4 h-4 text-blue-500" />
+              </div>
+              <span className="text-xs font-medium text-muted-foreground">All-Time</span>
             </div>
-            <div className="text-4xl font-black">{totalHoursEver} <span className="text-lg font-normal text-muted-foreground">hrs</span></div>
+            <div className="text-3xl font-black tabular-nums">{totalHoursEver}<span className="text-sm font-normal text-muted-foreground ml-1">hrs</span></div>
           </div>
-          <div className="p-6 rounded-2xl border bg-card/50 shadow-sm flex flex-col justify-center items-start">
-            <div className="text-sm font-semibold text-muted-foreground mb-1 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> Today's Study Time
+          
+          <div className="p-5 rounded-2xl border bg-linear-to-br from-emerald-500/10 to-transparent shadow-sm flex flex-col justify-between">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-2 rounded-lg bg-emerald-500/20">
+                <Calendar className="w-4 h-4 text-emerald-500" />
+              </div>
+              <span className="text-xs font-medium text-muted-foreground">Today</span>
             </div>
-            <div className="text-4xl font-black">{totalHoursToday} <span className="text-lg font-normal text-muted-foreground">hrs</span></div>
+            <div className="text-3xl font-black tabular-nums">{totalHoursToday}<span className="text-sm font-normal text-muted-foreground ml-1">hrs</span></div>
+          </div>
+          
+          <div className="p-5 rounded-2xl border bg-linear-to-br from-orange-500/10 to-transparent shadow-sm flex flex-col justify-between">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-2 rounded-lg bg-orange-500/20">
+                <Flame className="w-4 h-4 text-orange-500" />
+              </div>
+              <span className="text-xs font-medium text-muted-foreground">Streak</span>
+            </div>
+            <div className="text-3xl font-black tabular-nums">{studyStreak}<span className="text-sm font-normal text-muted-foreground ml-1">days</span></div>
+          </div>
+          
+          <div className="p-5 rounded-2xl border bg-linear-to-br from-purple-500/10 to-transparent shadow-sm flex flex-col justify-between">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-2 rounded-lg bg-purple-500/20">
+                <TrendingUp className="w-4 h-4 text-purple-500" />
+              </div>
+              <span className="text-xs font-medium text-muted-foreground">Daily Avg</span>
+            </div>
+            <div className="text-3xl font-black tabular-nums">{avgDailyHours}<span className="text-sm font-normal text-muted-foreground ml-1">hrs</span></div>
           </div>
         </div>
 
@@ -395,7 +458,7 @@ export function Stats() {
                       outerRadius={90}
                       paddingAngle={4}
                       dataKey="value"
-                      shape={MyCustomPie}
+                      shape={PieShape}
                     />
                     <Tooltip
                       contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', fontWeight: '500', color: 'var(--card-foreground)' }}
@@ -437,11 +500,8 @@ export function Stats() {
                       outerRadius={90}
                       paddingAngle={2}
                       dataKey="value"
-                    >
-                      {timeOfDayData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
+                      shape={PieShape}
+                    />
                     <Tooltip
                       contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', fontWeight: '500', color: 'var(--card-foreground)' }}
                       itemStyle={{ color: 'var(--foreground)' }}

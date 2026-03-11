@@ -23,4 +23,5 @@ dist-ssr
 *.sln
 *.sw?
 
-firebase.ts
+firebaseConfig.ts
+bun.lock
