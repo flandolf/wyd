@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
-import { Plus, BarChart3, Settings, BookOpen, Cloud, CloudOff, AlertCircle, RefreshCw } from "lucide-react"
+import { Plus, BarChart3, Settings, BookOpen, Cloud, CloudOff, AlertCircle, RefreshCw, RotateCcw } from "lucide-react"
 import { SubjectItem, type SubjectData } from "./components/SubjectItem"
 import { useAuth } from "./components/AuthProvider"
 import { useFirebaseSync } from "./hooks/useFirebaseSync"
@@ -30,7 +30,15 @@ function App(): React.JSX.Element {
   const [showSettings, setShowSettings] = useState(false)
 
   const { user, signInEmail, signUpEmail, logOut } = useAuth()
-  const { settings, isLoaded: settingsLoaded, updateDailyGoal, updatePomodoroDuration, updateBreakDuration } = useSettings()
+  const {
+    settings,
+    isLoaded: settingsLoaded,
+    updateDailyGoal,
+    updateDailyGoalByDay,
+    updatePomodoroDuration,
+    updateBreakDuration,
+    getTargetStudyTimeMs,
+  } = useSettings()
 
   const {
     subjects,
@@ -43,6 +51,7 @@ function App(): React.JSX.Element {
     addSubject,
     toggleSubject,
     resetSubject,
+    resetAllSubjects,
     deleteSubject,
     updateSubject,
     setSubjectTime,
@@ -88,6 +97,7 @@ function App(): React.JSX.Element {
   }, [subjects, currentTimeMs])
 
   const totalTime = useMemo(() => breakdown.reduce((acc, sw) => acc + sw.current, 0), [breakdown])
+  const targetDailyGoalMs = getTargetStudyTimeMs(new Date(currentTimeMs))
 
   const formatTotalTime = (ms: number) => {
     const totalSeconds = Math.floor(ms / 1000)
@@ -117,6 +127,13 @@ function App(): React.JSX.Element {
     })
   }, [subjects, addSubject])
 
+  const handleResetAll = () => {
+    if (window.confirm("Are you sure you want to reset all progress for today? This cannot be undone.")) {
+      resetAllSubjects()
+      toast.info("All daily progress has been reset")
+    }
+  }
+
   if (!isLoaded || !settingsLoaded) {
     return (
       <div className="flex flex-col items-center justify-center h-screen text-muted-foreground opacity-50 space-y-2">
@@ -136,8 +153,17 @@ function App(): React.JSX.Element {
         <div className="flex justify-between items-start">
           {/* Left: Session controls */}
           <div className="flex flex-col gap-1.5">
-            <div className="text-[10px] text-muted-foreground/80 font-semibold uppercase tracking-widest leading-none">
-              Studied Today
+            <div className="flex items-center gap-2 group">
+              <div className="text-[10px] text-muted-foreground/80 font-semibold uppercase tracking-widest leading-none">
+                Studied Today
+              </div>
+              <button
+                onClick={handleResetAll}
+                className="opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 text-muted-foreground hover:text-destructive p-0.5 rounded hover:bg-muted"
+                title="Reset all progress for today"
+              >
+                <RotateCcw className="h-2.5 w-2.5" />
+              </button>
             </div>
             <div className="flex items-center gap-1.5">
               <Button
@@ -216,7 +242,7 @@ function App(): React.JSX.Element {
                 {formatTotalTime(totalTime)}
               </div>
               <div className="text-[9px] text-muted-foreground mt-0.5">
-                / {formatTotalTime(settings.dailyGoalMs)}
+                / {formatTotalTime(targetDailyGoalMs)}
               </div>
             </div>
           </div>
@@ -230,7 +256,7 @@ function App(): React.JSX.Element {
                 key={sw.id}
                 className="transition-all duration-300 ease-linear first:rounded-l-full last:rounded-r-full"
                 style={{
-                  width: `${(sw.current / Math.max(totalTime, settings.dailyGoalMs)) * 100}%`,
+                  width: `${(sw.current / Math.max(totalTime, targetDailyGoalMs)) * 100}%`,
                   backgroundColor: sw.color || '#22c55e'
                 }}
                 title={`${sw.title}: ${formatTotalTime(sw.current)}`}
@@ -239,7 +265,7 @@ function App(): React.JSX.Element {
               <div className="w-0 transition-all duration-300" />
             )}
           </div>
-          {totalTime > settings.dailyGoalMs && (
+          {totalTime > targetDailyGoalMs && (
             <div className="text-[10px] text-primary self-end font-medium animate-in fade-in slide-in-from-right-2">
               Goal Reached! 🎉
             </div>
@@ -325,6 +351,7 @@ function App(): React.JSX.Element {
         onOpenChange={setShowSettings}
         settings={settings}
         onUpdateDailyGoal={updateDailyGoal}
+        onUpdateDailyGoalByDay={updateDailyGoalByDay}
         onUpdatePomodoroDuration={updatePomodoroDuration}
         onUpdateBreakDuration={updateBreakDuration}
         user={user}

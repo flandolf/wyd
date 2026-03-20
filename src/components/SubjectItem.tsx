@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react"
 import { Button } from "./ui/button"
 import { Play, Pause, RotateCcw, Trash2, Timer as TimerIcon, CheckCircle2, Circle, MoreVertical, ChevronUp, ChevronDown, Pencil } from "lucide-react"
@@ -55,13 +54,26 @@ interface SubjectItemProps {
   isLast?: boolean
 }
 
-function CircularProgress({ progress, size = 32, strokeWidth = 3, color }: { progress: number, size?: number, strokeWidth?: number, color: string }) {
+function CircularProgress({
+  progress,
+  size = 40,
+  strokeWidth = 3,
+  color,
+  isRunning,
+}: {
+  progress: number
+  size?: number
+  strokeWidth?: number
+  color: string
+  isRunning?: boolean
+}) {
   const radius = (size - strokeWidth) / 2
   const circumference = radius * 2 * Math.PI
   const offset = circumference - (Math.min(progress, 1) * circumference)
 
   return (
     <svg width={size} height={size} className="transform -rotate-90">
+      {/* Track */}
       <circle
         cx={size / 2}
         cy={size / 2}
@@ -71,6 +83,7 @@ function CircularProgress({ progress, size = 32, strokeWidth = 3, color }: { pro
         strokeWidth={strokeWidth}
         className="text-muted/30"
       />
+      {/* Progress arc */}
       <circle
         cx={size / 2}
         cy={size / 2}
@@ -81,7 +94,10 @@ function CircularProgress({ progress, size = 32, strokeWidth = 3, color }: { pro
         strokeDasharray={circumference}
         strokeDashoffset={offset}
         strokeLinecap="round"
-        className="transition-all duration-300"
+        style={{
+          transition: isRunning ? 'stroke-dashoffset 0.3s linear' : 'stroke-dashoffset 0.5s ease',
+          filter: isRunning ? `drop-shadow(0 0 3px ${color}80)` : undefined,
+        }}
       />
     </svg>
   )
@@ -91,6 +107,28 @@ const PRESET_COLORS = [
   '#ef4444', '#f97316', '#eab308', '#22c55e',
   '#0ea5e9', '#3b82f6', '#a855f7', '#ec4899',
 ]
+
+/** Format milliseconds to h:mm:ss or mm:ss */
+function formatMs(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+  }
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+/** Format milliseconds to a short human label e.g. "1h 23m" */
+function formatMsShort(ms: number): string {
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}s`
+  const hrs = Math.floor(ms / 3_600_000)
+  const mins = Math.floor((ms % 3_600_000) / 60_000)
+  if (hrs === 0) return `${mins}m`
+  if (mins === 0) return `${hrs}h`
+  return `${hrs}h ${mins}m`
+}
 
 export function SubjectItem({
   subject,
@@ -118,13 +156,13 @@ export function SubjectItem({
   const notifyPomodoroComplete = () => {
     if (typeof window === "undefined" || !("Notification" in window)) return
     if (Notification.permission === "granted") {
-      new window.Notification("Pomodoro Complete", { body: `${subject.title} - Time for a break!` })
+      new window.Notification("Pomodoro Complete", { body: `${subject.title} — Time for a break!` })
       return
     }
     if (Notification.permission === "default") {
       Notification.requestPermission().then((permission) => {
         if (permission === "granted") {
-          new window.Notification("Pomodoro Complete", { body: `${subject.title} - Time for a break!` })
+          new window.Notification("Pomodoro Complete", { body: `${subject.title} — Time for a break!` })
         }
       })
     }
@@ -174,16 +212,7 @@ export function SubjectItem({
     if (subject.isPomodoro) {
       targetMs = Math.max(0, pomodoroDurationMs - ms)
     }
-
-    const totalSeconds = Math.floor(targetMs / 1000)
-    const hours = Math.floor(totalSeconds / 3600)
-    const minutes = Math.floor((totalSeconds % 3600) / 60)
-    const seconds = totalSeconds % 60
-
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-    }
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+    return formatMs(targetMs)
   }
 
   const handleEditSubmit = (e: React.FormEvent) => {
@@ -198,17 +227,22 @@ export function SubjectItem({
     setIsEditModalOpen(false)
   }
 
-  // Calculate progress for circular indicator
+  // Progress for circular ring
   const progress = subject.isPomodoro
     ? displayTime / pomodoroDurationMs
-    : Math.min(displayTime / (60 * 60 * 1000), 1) // 1 hour as default max
+    : Math.min(displayTime / (60 * 60 * 1000), 1) // cap at 1 hour for display
 
-  // Count today's sessions
+  // Today's sessions
   const todayDate = new Date().toISOString().split('T')[0]
   const todaySessions = (subject.sessions || []).filter(s => {
     const sessionDate = s.startedAtIso ? s.startedAtIso.split('T')[0] : s.date
     return sessionDate === todayDate
-  }).length
+  })
+  const todaySessionCount = todaySessions.length
+  const todayTotalMs = todaySessions.reduce((sum, s) => sum + s.durationMs, 0)
+
+  // Whether we're close to completing a pomodoro (last 25%)
+  const isPomodoroWarning = subject.isPomodoro && progress > 0.75
 
   return (
     <>
@@ -219,11 +253,19 @@ export function SubjectItem({
           subject.isRunning && "ring-1 ring-primary/20 bg-primary/2",
           subject.isCompleted && "opacity-50"
         )}
+        style={
+          subject.isRunning
+            ? { boxShadow: `0 0 0 1px ${subject.color || '#22c55e'}25, 0 2px 8px ${subject.color || '#22c55e'}10` }
+            : undefined
+        }
       >
         {/* Color Bar */}
         <div
-          className="w-1 self-stretch rounded-full -my-2 -ml-2 mr-0.5"
-          style={{ backgroundColor: subject.color || '#22c55e' }}
+          className="w-1 self-stretch rounded-full -my-2 -ml-2 mr-0.5 transition-opacity"
+          style={{
+            backgroundColor: subject.color || '#22c55e',
+            opacity: subject.isCompleted ? 0.4 : 1,
+          }}
         />
 
         {/* Order controls */}
@@ -268,7 +310,8 @@ export function SubjectItem({
             progress={progress}
             size={40}
             strokeWidth={3}
-            color={subject.color || '#22c55e'}
+            color={isPomodoroWarning ? '#f97316' : (subject.color || '#22c55e')}
+            isRunning={subject.isRunning}
           />
           <div className="absolute inset-0 flex items-center justify-center">
             {subject.isRunning ? (
@@ -289,19 +332,24 @@ export function SubjectItem({
               {subject.title}
             </h3>
             {subject.isPomodoro && (
-              <TimerIcon className="h-3 w-3 text-primary shrink-0" />
+              <TimerIcon className={cn(
+                "h-3 w-3 shrink-0 transition-colors",
+                isPomodoroWarning ? "text-orange-400" : "text-primary"
+              )} />
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <span className={cn(
               "text-sm font-semibold tabular-nums tracking-wide",
-              subject.isRunning ? "text-primary" : "text-muted-foreground"
+              subject.isRunning ? "text-primary" : "text-muted-foreground",
+              isPomodoroWarning && subject.isRunning && "text-orange-400"
             )}>
               {formatTime(displayTime)}
             </span>
-            {todaySessions > 0 && (
-              <span className="text-[10px] text-muted-foreground/70">
-                {todaySessions} session{todaySessions !== 1 ? 's' : ''}
+            {/* Today's total — shows session count + total time if > 0 */}
+            {todaySessionCount > 0 && (
+              <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+                {todaySessionCount} {todaySessionCount === 1 ? 'session' : 'sessions'} · {formatMsShort(todayTotalMs)}
               </span>
             )}
           </div>
@@ -360,12 +408,13 @@ export function SubjectItem({
                 onChange={(e) => setEditTitle(e.target.value)}
                 className="h-8 text-sm"
                 placeholder="Subject name"
+                autoFocus
               />
             </div>
 
             <div className="space-y-2">
               <label className="text-xs font-medium">Color</label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {PRESET_COLORS.map(color => (
                   <button
                     key={color}
@@ -381,6 +430,11 @@ export function SubjectItem({
                   />
                 ))}
               </div>
+              {/* Preview swatch */}
+              <div
+                className="h-1 rounded-full mt-1 transition-all duration-200"
+                style={{ backgroundColor: editColor }}
+              />
             </div>
 
             <div className="space-y-2">
@@ -410,7 +464,7 @@ export function SubjectItem({
               <Button type="button" variant="ghost" size="sm" onClick={() => setIsEditModalOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm">
+              <Button type="submit" size="sm" disabled={!editTitle.trim()}>
                 Save
               </Button>
             </div>

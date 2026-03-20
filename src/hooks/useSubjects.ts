@@ -86,15 +86,57 @@ export function useSubjects(breakDurationMs: number) {
 
       loadedData = normalizeSubjects(loadedData)
 
-      // Reset daily accumulatedTime on new day
+      // Reset daily accumulatedTime on new day, archiving any unfinished work as a session
       if (lastActiveDate && lastActiveDate !== todayDate) {
-        loadedData = loadedData.map((sw: SubjectData) => ({
-          ...sw,
-          accumulatedTime: 0,
-          isRunning: false,
-          startTime: null,
-          isCompleted: false
-        }))
+        const resetAt = Date.now()
+        loadedData = loadedData.map((sw: SubjectData) => {
+          // 1. Capture any still-running time into a session
+          let archived = sw.isRunning ? completeRunningSession(sw, resetAt) : sw
+
+          // 2. If there's accumulated time with no matching session yet, archive it
+          const hasUnarchivedTime = archived.accumulatedTime > 0 && (() => {
+            const sessionTotal = (archived.sessions || [])
+              .filter(s => {
+                const d = s.startedAtIso
+                  ? localDateKeyFromMs(new Date(s.startedAtIso).getTime())
+                  : s.date
+                return d === lastActiveDate
+              })
+              .reduce((sum, s) => sum + s.durationMs, 0)
+            return sessionTotal < archived.accumulatedTime
+          })()
+
+          if (hasUnarchivedTime) {
+            const unarchived = archived.accumulatedTime -
+              (archived.sessions || [])
+                .filter(s => {
+                  const d = s.startedAtIso
+                    ? localDateKeyFromMs(new Date(s.startedAtIso).getTime())
+                    : s.date
+                  return d === lastActiveDate
+                })
+                .reduce((sum, s) => sum + s.durationMs, 0)
+
+            if (unarchived > 0) {
+              const session: StudySession = {
+                date: lastActiveDate,
+                durationMs: unarchived,
+                startedAtIso: new Date(resetAt - unarchived).toISOString(),
+                endedAtIso: new Date(resetAt).toISOString(),
+              }
+              archived = { ...archived, sessions: [...(archived.sessions || []), session] }
+            }
+          }
+
+          // 3. Zero out today's timer
+          return {
+            ...archived,
+            accumulatedTime: 0,
+            isRunning: false,
+            startTime: null,
+            isCompleted: false,
+          }
+        })
       }
 
       localStorage.setItem('wyd-last-active-date', todayDate)
@@ -171,16 +213,39 @@ export function useSubjects(breakDurationMs: number) {
           setSubjects(prev => {
             const now = Date.now()
             return prev.map(sw => {
-              // Complete any running session before resetting
-              if (sw.isRunning) {
-                sw = completeRunningSession(sw, now)
+              // 1. Complete any running session
+              let archived = sw.isRunning ? completeRunningSession(sw, now) : sw
+
+              // 2. Archive any accumulated time not yet in a session for lastActiveDate
+              if (archived.accumulatedTime > 0 && lastActiveDate) {
+                const sessionTotal = (archived.sessions || [])
+                  .filter(s => {
+                    const d = s.startedAtIso
+                      ? localDateKeyFromMs(new Date(s.startedAtIso).getTime())
+                      : s.date
+                    return d === lastActiveDate
+                  })
+                  .reduce((sum, s) => sum + s.durationMs, 0)
+
+                const unarchived = archived.accumulatedTime - sessionTotal
+                if (unarchived > 0) {
+                  const session: StudySession = {
+                    date: lastActiveDate,
+                    durationMs: unarchived,
+                    startedAtIso: new Date(now - unarchived).toISOString(),
+                    endedAtIso: new Date(now).toISOString(),
+                  }
+                  archived = { ...archived, sessions: [...(archived.sessions || []), session] }
+                }
               }
+
+              // 3. Zero out the daily timer
               return {
-                ...sw,
+                ...archived,
                 accumulatedTime: 0,
                 isRunning: false,
                 startTime: null,
-                isCompleted: false
+                isCompleted: false,
               }
             })
           })
@@ -284,6 +349,37 @@ export function useSubjects(breakDurationMs: number) {
         })
       }
     }))
+  }, [])
+
+  const resetAllSubjects = useCallback(() => {
+    const todayDate = localDateKeyFromMs(Date.now())
+    setSubjects(prev => prev.map(sw => {
+      // Filter out today's sessions for this subject
+      const remainingSessions = (sw.sessions || []).filter(s => {
+        const sessionDate = s.startedAtIso
+          ? localDateKeyFromMs(new Date(s.startedAtIso).getTime())
+          : s.date
+        return sessionDate !== todayDate
+      })
+
+      // Reset all activity state
+      return {
+        ...sw,
+        isRunning: false,
+        startTime: null,
+        accumulatedTime: 0,
+        isCompleted: false, // Reset completion status too
+        sessions: remainingSessions
+      }
+    }))
+    
+    // Also reset global session state
+    setIsStudySessionActive(false)
+    localStorage.setItem('wyd-study-session-active', 'false')
+    setRestStartTime(null)
+    localStorage.removeItem('wyd-rest-start')
+    setActiveBreak(null)
+    localStorage.removeItem('wyd-active-break')
   }, [])
 
   const deleteSubject = useCallback((id: string) => {
@@ -430,6 +526,7 @@ export function useSubjects(breakDurationMs: number) {
     addSubject,
     toggleSubject,
     resetSubject,
+    resetAllSubjects,
     deleteSubject,
     updateSubject,
     setSubjectTime,

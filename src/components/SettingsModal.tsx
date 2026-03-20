@@ -20,6 +20,7 @@ interface SettingsModalProps {
   onOpenChange: (open: boolean) => void
   settings: Settings
   onUpdateDailyGoal: (ms: number) => void
+  onUpdateDailyGoalByDay: (dayIndex: number, ms: number) => void
   onUpdatePomodoroDuration: (ms: number) => void
   onUpdateBreakDuration: (ms: number) => void
   user: User | null
@@ -38,6 +39,7 @@ export function SettingsModal({
   onOpenChange,
   settings,
   onUpdateDailyGoal,
+  onUpdateDailyGoalByDay,
   onUpdatePomodoroDuration,
   onUpdateBreakDuration,
   user,
@@ -50,6 +52,19 @@ export function SettingsModal({
   subjects,
   onImport,
 }: SettingsModalProps) {
+  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  
+  const [isCustomSchedule, setIsCustomSchedule] = useState(() => 
+    !settings.dailyGoalByDayMs.every((v) => v === settings.dailyGoalByDayMs[0])
+  )
+
+  const handleCustomScheduleChange = (checked: boolean) => {
+    setIsCustomSchedule(checked)
+    if (!checked) {
+      onUpdateDailyGoal(settings.dailyGoalMs)
+    }
+  }
+
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
   const [authError, setAuthError] = useState('')
@@ -143,19 +158,51 @@ export function SettingsModal({
           </TabsList>
 
           <TabsContent value="general" className="p-4 space-y-4 mt-0">
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-foreground">Daily Goal</label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min="0.5"
-                  step="0.5"
-                  value={settings.dailyGoalMs / 3600000}
-                  onChange={(e) => onUpdateDailyGoal(Number(e.target.value) * 3600000)}
-                  className="w-20 h-8 text-xs"
-                />
-                <span className="text-muted-foreground text-xs">hours</span>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-foreground">Daily Goal</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground">Custom schedule</span>
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-primary cursor-pointer"
+                    checked={isCustomSchedule}
+                    onChange={(e) => handleCustomScheduleChange(e.target.checked)}
+                  />
+                </div>
               </div>
+
+              {!isCustomSchedule ? (
+                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <Input
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    value={settings.dailyGoalMs / 3600000}
+                    onChange={(e) => onUpdateDailyGoal(Number(e.target.value) * 3600000)}
+                    className="w-20 h-8 text-xs"
+                  />
+                  <span className="text-muted-foreground text-xs">hours</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {[1, 2, 3, 4, 5, 6, 0].map((dayIndex) => (
+                    <div key={dayIndex} className="space-y-1">
+                      <span className="text-[10px] text-muted-foreground block text-center uppercase tracking-wider font-medium">
+                        {dayLabels[dayIndex]}
+                      </span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={settings.dailyGoalByDayMs[dayIndex] / 3600000}
+                        onChange={(e) => onUpdateDailyGoalByDay(dayIndex, Number(e.target.value) * 3600000)}
+                        className="h-8 text-xs text-center px-1"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 pt-2 border-t">
