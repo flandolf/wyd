@@ -40,18 +40,24 @@ export function useSettings() {
     const savedVolume = localStorage.getItem('wyd-sound-volume')
     const savedCategories = localStorage.getItem('wyd-categories')
 
-    const parsedDefaultGoal = savedGoal ? Number(savedGoal) : DEFAULT_SETTINGS.dailyGoalMs
+    const validateNum = (val: string | null, def: number, min?: number, max?: number) => {
+      const n = val !== null ? Number(val) : def
+      if (!Number.isFinite(n)) return def
+      if (min !== undefined && n < min) return def
+      if (max !== undefined && n > max) return def
+      return n
+    }
+
+    const parsedDefaultGoal = validateNum(savedGoal, DEFAULT_SETTINGS.dailyGoalMs, 0)
     let parsedGoalsByDay = Array(7).fill(parsedDefaultGoal)
 
     if (savedGoalsByDay) {
       try {
-        const parsed = JSON.parse(savedGoalsByDay) as number[]
-        if (Array.isArray(parsed) && parsed.length === 7 && parsed.every((value) => Number.isFinite(value) && value > 0)) {
+        const parsed = JSON.parse(savedGoalsByDay)
+        if (Array.isArray(parsed) && parsed.length === 7 && parsed.every((v) => Number.isFinite(v) && v > 0)) {
           parsedGoalsByDay = parsed
         }
-      } catch {
-        parsedGoalsByDay = Array(7).fill(parsedDefaultGoal)
-      }
+      } catch { /* ignore */ }
     }
 
     let parsedCategories = DEFAULT_SETTINGS.categories
@@ -65,12 +71,12 @@ export function useSettings() {
     setSettings({
       dailyGoalMs: parsedDefaultGoal,
       dailyGoalByDayMs: parsedGoalsByDay,
-      pomodoroDurationMs: savedPomodoro ? Number(savedPomodoro) : DEFAULT_SETTINGS.pomodoroDurationMs,
-      breakDurationMs: savedBreak ? Number(savedBreak) : DEFAULT_SETTINGS.breakDurationMs,
+      pomodoroDurationMs: validateNum(savedPomodoro, DEFAULT_SETTINGS.pomodoroDurationMs, 1),
+      breakDurationMs: validateNum(savedBreak, DEFAULT_SETTINGS.breakDurationMs, 1),
       idleDetectionEnabled: savedIdleDetection !== null ? savedIdleDetection === 'true' : DEFAULT_SETTINGS.idleDetectionEnabled,
-      idleThresholdMs: savedIdleThreshold ? Number(savedIdleThreshold) : DEFAULT_SETTINGS.idleThresholdMs,
+      idleThresholdMs: validateNum(savedIdleThreshold, DEFAULT_SETTINGS.idleThresholdMs, 0),
       autoPauseEnabled: savedAutoPause !== null ? savedAutoPause === 'true' : DEFAULT_SETTINGS.autoPauseEnabled,
-      soundVolume: savedVolume ? Number(savedVolume) : DEFAULT_SETTINGS.soundVolume,
+      soundVolume: validateNum(savedVolume, DEFAULT_SETTINGS.soundVolume, 0, 1),
       categories: parsedCategories,
     })
     setIsLoaded(true)
@@ -121,8 +127,9 @@ export function useSettings() {
   }, [])
 
   const updateIdleThreshold = useCallback((ms: number) => {
-    setSettings(prev => ({ ...prev, idleThresholdMs: ms }))
-    localStorage.setItem('wyd-idle-threshold-ms', ms.toString())
+    const sanitized = Number.isFinite(ms) ? Math.max(0, ms) : DEFAULT_SETTINGS.idleThresholdMs
+    setSettings(prev => ({ ...prev, idleThresholdMs: sanitized }))
+    localStorage.setItem('wyd-idle-threshold-ms', sanitized.toString())
   }, [])
 
   const updateAutoPause = useCallback((enabled: boolean) => {
@@ -131,8 +138,9 @@ export function useSettings() {
   }, [])
 
   const updateSoundVolume = useCallback((volume: number) => {
-    setSettings(prev => ({ ...prev, soundVolume: volume }))
-    localStorage.setItem('wyd-sound-volume', volume.toString())
+    const sanitized = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : DEFAULT_SETTINGS.soundVolume
+    setSettings(prev => ({ ...prev, soundVolume: sanitized }))
+    localStorage.setItem('wyd-sound-volume', sanitized.toString())
   }, [])
 
   const updateCategories = useCallback((categories: string[]) => {

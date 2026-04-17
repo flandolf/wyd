@@ -82,8 +82,9 @@ export function FocusOverlay({ subject, onClose, onToggle }: FocusOverlayProps) 
         size="icon"
         className="absolute top-8 right-8 text-white/40 hover:text-white hover:bg-white/10 h-12 w-12 rounded-full"
         onClick={onClose}
+        aria-label="Close focus mode"
       >
-        <X className="w-8 h-8" />
+        <X className="w-8 h-8" aria-hidden="true" />
       </Button>
 
       <div className="text-center space-y-12 max-w-2xl w-full px-8">
@@ -137,8 +138,11 @@ export function FocusOverlay({ subject, onClose, onToggle }: FocusOverlayProps) 
             </div>
 
             <div className="flex items-center gap-4 px-8">
-              <button onClick={() => setIsMuted(!isMuted)}>
-                {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 text-white/40" /> : <Volume2 className="w-5 h-5 text-white/40" />}
+              <button
+                onClick={() => setIsMuted(!isMuted)}
+                aria-label={isMuted ? "Unmute sounds" : "Mute sounds"}
+              >
+                {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 text-white/40" aria-hidden="true" /> : <Volume2 className="w-5 h-5 text-white/40" aria-hidden="true" />}
               </button>
               <Slider
                 value={[isMuted ? 0 : volume]}

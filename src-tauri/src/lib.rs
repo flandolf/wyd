@@ -61,10 +61,10 @@ fn save_data(app: AppHandle, data: Vec<StopwatchData>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_idle_time() -> u64 {
-    // In a real implementation, we would use a crate like `inputbot` or platform-specific APIs
-    // For this overhaul, we'll simulate the bridge
-    0
+fn get_idle_time() -> Result<u64, String> {
+    use user_idle::UserIdle;
+    let idle = UserIdle::get_time().map_err(|e| e.to_string())?;
+    Ok(idle.as_millis() as u64)
 }
 
 #[tauri::command]

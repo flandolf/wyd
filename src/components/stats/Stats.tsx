@@ -67,10 +67,16 @@ export function Stats() {
     const subjectMap: Record<string, { name: string, value: number, color: string }> = {}
     const categoryMap: Record<string, number> = {}
 
+    const now = new Date()
+    const cutoff = timeRange === 'all' ? 0 : now.getTime() - (timeRange === '7d' ? 7 : 30) * 24 * 60 * 60 * 1000
+
     data.forEach(sw => {
       sw.sessions?.forEach(session => {
-        const date = session.startedAtIso ? session.startedAtIso.split('T')[0] : session.date
-        datesMap[date] = (datesMap[date] || 0) + session.durationMs
+        const sessionDate = session.startedAtIso ? new Date(session.startedAtIso) : new Date(session.date + 'T00:00:00')
+        if (sessionDate.getTime() < cutoff) return
+
+        const dateKey = session.startedAtIso ? session.startedAtIso.split('T')[0] : session.date
+        datesMap[dateKey] = (datesMap[dateKey] || 0) + session.durationMs
 
         subjectMap[sw.id] = {
           name: sw.title,
@@ -84,11 +90,15 @@ export function Stats() {
       })
     })
 
-    const daily = Object.entries(datesMap).map(([date, ms]) => ({
-      date,
-      hours: Number((ms / 3600000).toFixed(2)),
-      label: new Date(date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-    })).sort((a, b) => a.date.localeCompare(b.date))
+    const daily = Object.entries(datesMap).map(([date, ms]) => {
+      const [year, month, day] = date.split('-').map(Number)
+      const localDate = new Date(year, month - 1, day)
+      return {
+        date,
+        hours: Number((ms / 3600000).toFixed(2)),
+        label: localDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+      }
+    }).sort((a, b) => a.date.localeCompare(b.date))
 
     return {
       dailyData: daily,

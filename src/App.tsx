@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
@@ -15,6 +15,7 @@ import { useSubjects } from "./hooks/useSubjects"
 import { useSettings } from "./hooks/useSettings"
 import { SettingsModal } from "./components/SettingsModal"
 import { EditSubjectModal } from "./components/EditSubjectModal"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog"
 import { cn } from './lib/utils'
 
 const PRESET_COLORS = [
@@ -29,6 +30,7 @@ function App(): React.JSX.Element {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showAddModal, setShowAddModal] = useState(false)
+  const pendingIdlePoll = useRef(false)
   const [editingSubject, setEditingSubject] = useState<SubjectData | null>(null)
 
   const { user, signInEmail, signUpEmail, logOut } = useAuth()
@@ -49,6 +51,7 @@ function App(): React.JSX.Element {
     handleRemoteUpdate,
     addSubject,
     toggleSubject,
+    resetAllSubjects,
     deleteSubject,
     updateSubject,
     togglePomodoro,
@@ -59,6 +62,27 @@ function App(): React.JSX.Element {
   const { syncState, syncError, retrySync } = useFirebaseSync(user, subjects, isLoaded, handleRemoteUpdate)
 
   const activeSubject = useMemo(() => subjects.find(s => s.isRunning), [subjects])
+
+  const handleImport = (importedData: any[]) => {
+    importedData.forEach(importedItem => {
+      const exists = subjects.find(s => s.id === importedItem.id || s.title === importedItem.title)
+      if (!exists) {
+        addSubject(
+          importedItem.title,
+          importedItem.color || PRESET_COLORS[0],
+          importedItem.icon || "Book",
+          importedItem.category
+        )
+      }
+    })
+  }
+
+  const handleResetAll = () => {
+    if (window.confirm("Are you sure you want to reset all progress for today?")) {
+      resetAllSubjects()
+      import('sonner').then(({ toast }) => toast.info("Daily progress has been reset"))
+    }
+  }
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -95,13 +119,21 @@ function App(): React.JSX.Element {
       checkBreakEnded(Date.now())
 
       // Idle Detection check
-      if (settings.idleDetectionEnabled) {
-        invoke<number>('get_idle_time').then(idleMs => {
-          if (idleMs > settings.idleThresholdMs && isTimerRunning) {
-             // In a real app, show a toast or notification to pause
-             // toast.info("User idle detected. Should we pause the timer?")
-          }
-        })
+      if (settings.idleDetectionEnabled && isTimerRunning && !pendingIdlePoll.current) {
+        pendingIdlePoll.current = true
+        invoke<number>('get_idle_time')
+          .then(idleMs => {
+            if (idleMs > settings.idleThresholdMs) {
+               // In a real app, show a toast or notification to pause
+               // toast.info("User idle detected. Should we pause the timer?")
+            }
+          })
+          .catch(err => {
+            console.error("Failed to poll idle time:", err)
+          })
+          .finally(() => {
+            pendingIdlePoll.current = false
+          })
       }
     }, 1000)
     return () => clearInterval(interval)
@@ -239,10 +271,17 @@ function App(): React.JSX.Element {
                   syncError={syncError}
                   onRetrySync={retrySync}
                   subjects={subjects}
-                  onImport={() => {}}
+                  onImport={handleImport}
                   embedded
                   onUpdateCategories={updateCategories}
                 />
+                <div className="mt-8 pt-8 border-t">
+                  <h3 className="text-lg font-bold text-destructive mb-2">Danger Zone</h3>
+                  <p className="text-sm text-muted-foreground mb-4">Resetting will clear all accumulated time for today. This action cannot be undone.</p>
+                  <Button variant="destructive" onClick={handleResetAll} className="font-bold">
+                    Reset All Progress Today
+                  </Button>
+                </div>
             </div>
           )}
         </div>
@@ -296,31 +335,32 @@ function App(): React.JSX.Element {
       />
 
       {/* Quick Add Dialog */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-           <div className="bg-card border rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in-95 duration-200">
-             <h2 className="text-2xl font-black mb-6">Track New Subject</h2>
-             <form onSubmit={(e) => {
-               e.preventDefault();
-               const form = e.target as HTMLFormElement;
-               const title = (form.elements.namedItem('title') as HTMLInputElement).value;
-               if (title) {
-                 addSubject(title, PRESET_COLORS[0], "Book", selectedCategory || undefined);
-                 setShowAddModal(false);
-               }
-             }} className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Subject Title</label>
-                  <Input name="title" autoFocus placeholder="e.g. Advanced Calculus" className="h-12 text-lg rounded-xl" />
-                </div>
-                <div className="flex gap-3">
-                  <Button type="button" variant="outline" onClick={() => setShowAddModal(false)} className="flex-1 h-12 rounded-xl font-bold">Cancel</Button>
-                  <Button type="submit" className="flex-1 h-12 rounded-xl font-bold">Start Tracking</Button>
-                </div>
-             </form>
-           </div>
-        </div>
-      )}
+      <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+        <DialogContent className="sm:max-w-md p-8 rounded-3xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black">Track New Subject</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const form = e.target as HTMLFormElement;
+            const titleInput = form.elements.namedItem('title') as HTMLInputElement;
+            const title = titleInput.value.trim();
+            if (title) {
+              addSubject(title, PRESET_COLORS[0], "Book", selectedCategory || undefined);
+              setShowAddModal(false);
+            }
+          }} className="space-y-6 mt-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Subject Title</label>
+              <Input name="title" autoFocus placeholder="e.g. Advanced Calculus" className="h-12 text-lg rounded-xl" />
+            </div>
+            <div className="flex gap-3">
+              <Button type="button" variant="outline" onClick={() => setShowAddModal(false)} className="flex-1 h-12 rounded-xl font-bold">Cancel</Button>
+              <Button type="submit" className="flex-1 h-12 rounded-xl font-bold">Start Tracking</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

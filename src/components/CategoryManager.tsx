@@ -46,6 +46,8 @@ export function CategoryManager({ categories, onUpdateCategories }: CategoryMana
             <button
               onClick={() => handleRemove(cat)}
               className="ml-1 p-0.5 rounded-full hover:bg-muted-foreground/20 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+              aria-label={`Remove category ${cat}`}
+              title={`Remove category ${cat}`}
             >
               <X className="w-3 h-3" />
             </button>

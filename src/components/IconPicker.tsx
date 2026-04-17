@@ -26,8 +26,9 @@ export function IconPicker({ selectedIcon, onSelect, color }: IconPickerProps) {
           size="icon"
           className="w-10 h-10 rounded-xl"
           style={{ color: color, borderColor: `${color}40` }}
+          aria-label={`Choose icon (current: ${selectedIcon || 'Book'})`}
         >
-          <IconComponent className="w-5 h-5" />
+          <IconComponent className="w-5 h-5" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-2">
@@ -44,8 +45,10 @@ export function IconPicker({ selectedIcon, onSelect, color }: IconPickerProps) {
                   selectedIcon === iconName && "bg-muted"
                 )}
                 onClick={() => onSelect(iconName)}
+                aria-label={`${iconName} icon`}
+                title={iconName}
               >
-                <Icon className="w-5 h-5" />
+                <Icon className="w-5 h-5" aria-hidden="true" />
               </Button>
             )
           })}

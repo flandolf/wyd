@@ -98,22 +98,6 @@ export function SettingsModal({
     toast.success('Signed out')
   }
 
-  /*
-  const exportToJson = () => {
-    const dataStr = JSON.stringify(subjects, null, 2)
-    const blob = new Blob([dataStr], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `wyd-subjects-${new Date().toISOString().split('T')[0]}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    toast.success('Data exported')
-  }
-  */
-
   const importFromJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -121,10 +105,24 @@ export function SettingsModal({
     const reader = new FileReader()
     reader.onload = (event) => {
       try {
-        const importedData = JSON.parse(event.target?.result as string) as SubjectData[]
+        const importedData = JSON.parse(event.target?.result as string)
         if (Array.isArray(importedData)) {
-          onImport(importedData)
-          toast.success(`Imported ${importedData.length} subjects`)
+          const isValidSubject = (item: any): item is SubjectData => {
+            return typeof item === 'object' && item !== null && typeof item.id === 'string' && typeof item.title === 'string'
+          }
+
+          const validItems = importedData.filter(isValidSubject)
+          const invalidCount = importedData.length - validItems.length
+
+          if (validItems.length > 0) {
+            onImport(validItems)
+            toast.success(`Imported ${validItems.length} subjects`)
+            if (invalidCount > 0) {
+              toast.warning(`Skipped ${invalidCount} invalid items`)
+            }
+          } else {
+            toast.error('No valid subject data found in file')
+          }
         }
       } catch (err) {
         toast.error('Failed to parse JSON file')

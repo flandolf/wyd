@@ -81,7 +81,7 @@ export function Sidebar({
             {syncState === 'syncing' && <RefreshCw className="w-4 h-4 animate-spin" />}
             {syncState === 'synced' && <Cloud className="w-4 h-4 text-emerald-500" />}
             {syncState === 'error' && (
-              <button onClick={onRetrySync}>
+              <button onClick={onRetrySync} aria-label="Retry sync">
                 <AlertCircle className="w-4 h-4 text-destructive" />
               </button>
             )}

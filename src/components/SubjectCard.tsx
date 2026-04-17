@@ -53,7 +53,7 @@ export function SubjectCard({
   const [displayTime, setDisplayTime] = useState(subject.accumulatedTime)
 
   useEffect(() => {
-    let animationFrameId: number
+    let animationFrameId: number | undefined
     const updateTime = () => {
       if (subject.isRunning && subject.startTime !== null) {
         const elapsed = subject.accumulatedTime + (Date.now() - subject.startTime)
@@ -64,7 +64,9 @@ export function SubjectCard({
       }
     }
     updateTime()
-    return () => cancelAnimationFrame(animationFrameId)
+    return () => {
+      if (animationFrameId !== undefined) cancelAnimationFrame(animationFrameId)
+    }
   }, [subject.isRunning, subject.startTime, subject.accumulatedTime])
 
   const IconComponent = (LucideIcons as any)[subject.icon || 'Book'] || LucideIcons.Book
@@ -116,13 +118,18 @@ export function SubjectCard({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 -mr-2 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-              <MoreVertical className="w-4 h-4" />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 -mr-2 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity"
+              aria-label={`Actions for ${subject.title}`}
+            >
+              <MoreVertical className="w-4 h-4" aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => onEdit(subject)}>
-              < LucideIcons.Pencil className="w-4 h-4 mr-2" /> Edit
+              <LucideIcons.Pencil className="w-4 h-4 mr-2" /> Edit
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onTogglePomodoro(subject.id)}>
               <Timer className="w-4 h-4 mr-2" /> {subject.isPomodoro ? 'Disable' : 'Enable'} Pomodoro
@@ -132,7 +139,7 @@ export function SubjectCard({
               <CheckCircle2 className="w-4 h-4 mr-2" /> {subject.isCompleted ? 'Unmark' : 'Mark'} Complete
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onDelete(subject.id)} className="text-destructive">
-              < LucideIcons.Trash2 className="w-4 h-4 mr-2" /> Delete
+              <LucideIcons.Trash2 className="w-4 h-4 mr-2" /> Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -191,8 +198,9 @@ export function SubjectCard({
             size="icon"
             className="h-10 w-10 rounded-xl"
             onClick={() => onEdit(subject)}
+            aria-label={`Edit ${subject.title}`}
           >
-            <FileText className="w-4 h-4" />
+            <FileText className="w-4 h-4" aria-hidden="true" />
           </Button>
         </div>
       </div>

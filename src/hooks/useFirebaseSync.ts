@@ -13,6 +13,11 @@ export function useFirebaseSync(
   onRemoteUpdate: (data: SubjectData[]) => void,
 ) {
   const isRemoteUpdate = useRef(false)
+  const subjectsRef = useRef(subjects)
+
+  useEffect(() => {
+    subjectsRef.current = subjects
+  }, [subjects])
   const unsubRef = useRef<Unsubscribe | null>(null)
   const [syncState, setSyncState] = useState<SyncState>('idle')
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -55,7 +60,7 @@ export function useFirebaseSync(
       if (data && Array.isArray(data)) {
         // Simple conflict resolution: prefer remote if it has more sessions or higher accumulated time
         const remoteTotalTime = data.reduce((acc: number, s: any) => acc + (s.accumulatedTime || 0), 0)
-        const localTotalTime = subjects.reduce((acc, s) => acc + s.accumulatedTime, 0)
+        const localTotalTime = subjectsRef.current.reduce((acc, s) => acc + s.accumulatedTime, 0)
 
         if (remoteTotalTime > localTotalTime) {
           isRemoteUpdate.current = true

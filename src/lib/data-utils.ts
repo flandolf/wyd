@@ -1,38 +1,56 @@
 import { SubjectData } from "../components/SubjectItem";
 
+function escapeCsvCell(cell: any): string {
+  let str = String(cell ?? '');
+  // Neutralize formula injection
+  if (['=', '+', '-', '@'].includes(str[0])) {
+    str = "'" + str;
+  }
+  // Escape quotes and wrap
+  return '"' + str.replace(/"/g, '""') + '"';
+}
+
 export function exportToJSON(subjects: SubjectData[]) {
   const dataStr = JSON.stringify(subjects, null, 2);
-  const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+  const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
 
-  const exportFileDefaultName = `focusflow-export-${new Date().toISOString().split('T')[0]}.json`;
-
-  const linkElement = document.createElement('a');
-  linkElement.setAttribute('href', dataUri);
-  linkElement.setAttribute('download', exportFileDefaultName);
-  linkElement.click();
+  const filename = `focusflow-export-${new Date().toISOString().split('T')[0]}.json`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export function exportToCSV(subjects: SubjectData[]) {
-  let csvContent = "Subject,Category,Date,Duration (ms),Notes\n";
+  const headers = ["Subject", "Category", "Date", "Duration (ms)", "Notes"];
+  let csvContent = headers.join(",") + "\n";
 
   subjects.forEach(subject => {
     subject.sessions?.forEach(session => {
       const row = [
-        `"${subject.title}"`,
-        `"${subject.category || ''}"`,
-        session.date,
-        session.durationMs,
-        `"${session.notes || ''}"`
+        escapeCsvCell(subject.title),
+        escapeCsvCell(subject.category || ''),
+        escapeCsvCell(session.date),
+        escapeCsvCell(session.durationMs),
+        escapeCsvCell(session.notes || '')
       ].join(",");
       csvContent += row + "\n";
     });
   });
 
-  const dataUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
-  const exportFileDefaultName = `focusflow-export-${new Date().toISOString().split('T')[0]}.csv`;
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
 
-  const linkElement = document.createElement('a');
-  linkElement.setAttribute('href', dataUri);
-  linkElement.setAttribute('download', exportFileDefaultName);
-  linkElement.click();
+  const filename = `focusflow-export-${new Date().toISOString().split('T')[0]}.csv`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }

@@ -47,8 +47,10 @@ export function EditSubjectModal({
 
   const handleSave = () => {
     if (!subject) return
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) return
     onSave(subject.id, {
-      title,
+      title: trimmedTitle,
       color,
       icon,
       category: category || undefined,
@@ -86,6 +88,8 @@ export function EditSubjectModal({
                       className={`w-6 h-6 rounded-full transition-all ${color === c ? 'ring-2 ring-primary ring-offset-2 scale-110' : ''}`}
                       style={{ backgroundColor: c }}
                       onClick={() => setColor(c)}
+                      aria-label={`Select color ${c}`}
+                      aria-pressed={color === c}
                     />
                   ))}
                 </div>
