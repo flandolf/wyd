@@ -12,6 +12,7 @@ pub struct StopwatchSession {
     pub duration_ms: u64,
     pub started_at_iso: Option<String>,
     pub ended_at_iso: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -23,9 +24,13 @@ pub struct StopwatchData {
     pub accumulated_time: u64,
     pub is_running: bool,
     pub color: Option<String>,
+    pub icon: Option<String>,
+    pub category: Option<String>,
+    pub daily_goal_ms: Option<u64>,
     pub is_pomodoro: Option<bool>,
     pub sessions: Option<Vec<StopwatchSession>>,
     pub order: Option<u32>,
+    pub is_completed: Option<bool>,
 }
 
 fn get_data_file_path(app: &AppHandle) -> std::io::Result<PathBuf> {
@@ -53,6 +58,13 @@ fn save_data(app: AppHandle, data: Vec<StopwatchData>) -> Result<(), String> {
     let content = serde_json::to_string(&data).map_err(|e| e.to_string())?;
     fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn get_idle_time() -> u64 {
+    // In a real implementation, we would use a crate like `inputbot` or platform-specific APIs
+    // For this overhaul, we'll simulate the bridge
+    0
 }
 
 #[tauri::command]
@@ -121,7 +133,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_data, save_data, open_stats])
+        .invoke_handler(tauri::generate_handler![load_data, save_data, open_stats, get_idle_time])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

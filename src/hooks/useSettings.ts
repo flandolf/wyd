@@ -5,6 +5,11 @@ export interface Settings {
   dailyGoalByDayMs: number[]
   pomodoroDurationMs: number
   breakDurationMs: number
+  idleDetectionEnabled: boolean
+  idleThresholdMs: number
+  autoPauseEnabled: boolean
+  soundVolume: number
+  categories: string[]
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -12,6 +17,11 @@ const DEFAULT_SETTINGS: Settings = {
   dailyGoalByDayMs: Array(7).fill(4 * 60 * 60 * 1000),
   pomodoroDurationMs: 25 * 60 * 1000, // 25 minutes
   breakDurationMs: 5 * 60 * 1000, // 5 minutes
+  idleDetectionEnabled: true,
+  idleThresholdMs: 5 * 60 * 1000, // 5 minutes
+  autoPauseEnabled: false,
+  soundVolume: 0.5,
+  categories: ["Study", "Work", "Hobby", "Exercise"],
 }
 
 export function useSettings() {
@@ -24,6 +34,11 @@ export function useSettings() {
     const savedGoalsByDay = localStorage.getItem('wyd-daily-goal-by-day-ms')
     const savedPomodoro = localStorage.getItem('wyd-pomodoro-duration-ms')
     const savedBreak = localStorage.getItem('wyd-break-duration-ms')
+    const savedIdleDetection = localStorage.getItem('wyd-idle-detection-enabled')
+    const savedIdleThreshold = localStorage.getItem('wyd-idle-threshold-ms')
+    const savedAutoPause = localStorage.getItem('wyd-auto-pause-enabled')
+    const savedVolume = localStorage.getItem('wyd-sound-volume')
+    const savedCategories = localStorage.getItem('wyd-categories')
 
     const parsedDefaultGoal = savedGoal ? Number(savedGoal) : DEFAULT_SETTINGS.dailyGoalMs
     let parsedGoalsByDay = Array(7).fill(parsedDefaultGoal)
@@ -39,11 +54,24 @@ export function useSettings() {
       }
     }
 
+    let parsedCategories = DEFAULT_SETTINGS.categories
+    if (savedCategories) {
+      try {
+        const parsed = JSON.parse(savedCategories)
+        if (Array.isArray(parsed)) parsedCategories = parsed
+      } catch { /* ignore */ }
+    }
+
     setSettings({
       dailyGoalMs: parsedDefaultGoal,
       dailyGoalByDayMs: parsedGoalsByDay,
       pomodoroDurationMs: savedPomodoro ? Number(savedPomodoro) : DEFAULT_SETTINGS.pomodoroDurationMs,
       breakDurationMs: savedBreak ? Number(savedBreak) : DEFAULT_SETTINGS.breakDurationMs,
+      idleDetectionEnabled: savedIdleDetection !== null ? savedIdleDetection === 'true' : DEFAULT_SETTINGS.idleDetectionEnabled,
+      idleThresholdMs: savedIdleThreshold ? Number(savedIdleThreshold) : DEFAULT_SETTINGS.idleThresholdMs,
+      autoPauseEnabled: savedAutoPause !== null ? savedAutoPause === 'true' : DEFAULT_SETTINGS.autoPauseEnabled,
+      soundVolume: savedVolume ? Number(savedVolume) : DEFAULT_SETTINGS.soundVolume,
+      categories: parsedCategories,
     })
     setIsLoaded(true)
   }, [])
@@ -87,6 +115,31 @@ export function useSettings() {
     localStorage.setItem('wyd-break-duration-ms', ms.toString())
   }, [])
 
+  const updateIdleDetection = useCallback((enabled: boolean) => {
+    setSettings(prev => ({ ...prev, idleDetectionEnabled: enabled }))
+    localStorage.setItem('wyd-idle-detection-enabled', enabled.toString())
+  }, [])
+
+  const updateIdleThreshold = useCallback((ms: number) => {
+    setSettings(prev => ({ ...prev, idleThresholdMs: ms }))
+    localStorage.setItem('wyd-idle-threshold-ms', ms.toString())
+  }, [])
+
+  const updateAutoPause = useCallback((enabled: boolean) => {
+    setSettings(prev => ({ ...prev, autoPauseEnabled: enabled }))
+    localStorage.setItem('wyd-auto-pause-enabled', enabled.toString())
+  }, [])
+
+  const updateSoundVolume = useCallback((volume: number) => {
+    setSettings(prev => ({ ...prev, soundVolume: volume }))
+    localStorage.setItem('wyd-sound-volume', volume.toString())
+  }, [])
+
+  const updateCategories = useCallback((categories: string[]) => {
+    setSettings(prev => ({ ...prev, categories }))
+    localStorage.setItem('wyd-categories', JSON.stringify(categories))
+  }, [])
+
   return {
     settings,
     isLoaded,
@@ -94,6 +147,11 @@ export function useSettings() {
     updateDailyGoalByDay,
     updatePomodoroDuration,
     updateBreakDuration,
+    updateIdleDetection,
+    updateIdleThreshold,
+    updateAutoPause,
+    updateSoundVolume,
+    updateCategories,
     getTargetStudyTimeMs,
   }
 }

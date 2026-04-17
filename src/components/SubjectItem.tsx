@@ -22,6 +22,7 @@ export interface StudySession {
   durationMs: number
   startedAtIso?: string
   endedAtIso?: string
+  notes?: string
 }
 
 export interface SubjectData {
@@ -31,6 +32,9 @@ export interface SubjectData {
   accumulatedTime: number
   isRunning: boolean
   color?: string
+  icon?: string
+  category?: string
+  dailyGoalMs?: number
   sessions?: StudySession[]
   isPomodoro?: boolean
   isCompleted?: boolean

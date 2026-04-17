@@ -271,7 +271,7 @@ export function useSubjects(breakDurationMs: number) {
     setSubjects(normalizeSubjects(data).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)))
   }, [])
 
-  const addSubject = useCallback((title: string, color: string) => {
+  const addSubject = useCallback((title: string, color: string, icon?: string, category?: string) => {
     if (!title.trim()) return
 
     const newSubject: SubjectData = {
@@ -281,6 +281,8 @@ export function useSubjects(breakDurationMs: number) {
       accumulatedTime: 0,
       isRunning: false,
       color,
+      icon,
+      category,
       order: subjects.length,
     }
 
@@ -392,7 +394,7 @@ export function useSubjects(breakDurationMs: number) {
     ))
   }, [])
 
-  const setSubjectTime = useCallback((id: string, totalMs: number) => {
+  const setSubjectTime = useCallback((id: string, totalMs: number, notes?: string) => {
     const now = Date.now()
     const todayDate = localDateKeyFromMs(now)
 
@@ -413,6 +415,7 @@ export function useSubjects(breakDurationMs: number) {
           durationMs: totalMs,
           startedAtIso: new Date(now - totalMs).toISOString(),
           endedAtIso: new Date(now).toISOString(),
+          notes,
         }
       ] : pastSessions
 

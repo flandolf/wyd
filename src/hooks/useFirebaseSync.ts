@@ -53,11 +53,21 @@ export function useFirebaseSync(
     unsubRef.current = onValue(userRef, (snapshot) => {
       const data = snapshot.val()
       if (data && Array.isArray(data)) {
-        isRemoteUpdate.current = true
-        onRemoteUpdate(data)
+        // Simple conflict resolution: prefer remote if it has more sessions or higher accumulated time
+        const remoteTotalTime = data.reduce((acc: number, s: any) => acc + (s.accumulatedTime || 0), 0)
+        const localTotalTime = subjects.reduce((acc, s) => acc + s.accumulatedTime, 0)
+
+        if (remoteTotalTime > localTotalTime) {
+          isRemoteUpdate.current = true
+          onRemoteUpdate(data)
+        }
       }
       setSyncState('synced')
       setSyncError(null)
+    }, (error) => {
+      console.error("Firebase subscription error:", error)
+      setSyncState('error')
+      setSyncError(error.message)
     })
 
     return () => {

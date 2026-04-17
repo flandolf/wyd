@@ -8,12 +8,14 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
-import { Download, Upload, Cloud, CloudOff, AlertCircle, RefreshCw } from "lucide-react"
+import { Download, Upload, Cloud, CloudOff, AlertCircle, RefreshCw, FileText } from "lucide-react"
+import { exportToJSON, exportToCSV } from '../lib/data-utils'
 import type { Settings } from '../hooks/useSettings'
 import type { User } from 'firebase/auth'
 import type { SyncState } from '../hooks/useFirebaseSync'
 import type { SubjectData } from './SubjectItem'
 import { toast } from 'sonner'
+import { cn } from '../lib/utils'
 
 interface SettingsModalProps {
   open: boolean
@@ -32,6 +34,8 @@ interface SettingsModalProps {
   onRetrySync: () => void
   subjects: SubjectData[]
   onImport: (data: SubjectData[]) => void
+  embedded?: boolean
+  onUpdateCategories?: (categories: string[]) => void
 }
 
 export function SettingsModal({
@@ -51,6 +55,7 @@ export function SettingsModal({
   onRetrySync,
   subjects,
   onImport,
+  embedded,
 }: SettingsModalProps) {
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   
@@ -93,6 +98,7 @@ export function SettingsModal({
     toast.success('Signed out')
   }
 
+  /*
   const exportToJson = () => {
     const dataStr = JSON.stringify(subjects, null, 2)
     const blob = new Blob([dataStr], { type: 'application/json' })
@@ -106,6 +112,7 @@ export function SettingsModal({
     URL.revokeObjectURL(url)
     toast.success('Data exported')
   }
+  */
 
   const importFromJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -128,12 +135,13 @@ export function SettingsModal({
     e.target.value = ''
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-100 p-0 gap-0 rounded-xl overflow-hidden">
+  const content = (
+    <div className={cn("flex flex-col", embedded ? "w-full" : "sm:max-w-100")}>
+      {!embedded && (
         <DialogHeader className="p-4 pb-0">
           <DialogTitle className="text-base font-semibold">Settings</DialogTitle>
         </DialogHeader>
+      )}
 
         <Tabs defaultValue="general" className="w-full">
           <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-4 h-10">
@@ -319,7 +327,7 @@ export function SettingsModal({
           </TabsContent>
 
           <TabsContent value="data" className="p-4 space-y-3 mt-0">
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <label className="flex-1">
                 <input
                   type="file"
@@ -334,16 +342,29 @@ export function SettingsModal({
                   </span>
                 </Button>
               </label>
-              <Button variant="outline" size="sm" className="flex-1 text-xs h-8" onClick={exportToJson}>
+              <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => exportToJSON(subjects)}>
                 <Download className="h-3.5 w-3.5 mr-1.5" />
-                Export
+                JSON Export
+              </Button>
+              <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => exportToCSV(subjects)}>
+                <FileText className="h-3.5 w-3.5 mr-1.5" />
+                CSV Export
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Import merges with existing subjects. Export saves all data as JSON.
+              Import merges with existing subjects. Export saves your full history in JSON or CSV format for spreadsheet analysis.
             </p>
           </TabsContent>
         </Tabs>
+    </div>
+  )
+
+  if (embedded) return content
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-100 p-0 gap-0 rounded-xl overflow-hidden">
+        {content}
       </DialogContent>
     </Dialog>
   )
