@@ -105,7 +105,7 @@ export function Stats() {
       subjectData: Object.values(subjectMap).sort((a, b) => b.value - a.value),
       categoryData: Object.entries(categoryMap).map(([name, value]) => ({ name, value }))
     }
-  }, [data])
+  }, [data, timeRange])
 
   const totalHours = (Object.values(subjectData).reduce((acc, s) => acc + s.value, 0) / 3600000).toFixed(1)
   const streak = calculateStreak(useMemo(() => {

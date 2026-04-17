@@ -77,6 +77,7 @@ export function Sidebar({
 
         <div className="px-3 py-2 flex items-center gap-3 text-xs text-muted-foreground">
           <div className="shrink-0">
+            {syncState === 'idle' && <Cloud className="w-4 h-4" />}
             {syncState === 'offline' && <CloudOff className="w-4 h-4" />}
             {syncState === 'syncing' && <RefreshCw className="w-4 h-4 animate-spin" />}
             {syncState === 'synced' && <Cloud className="w-4 h-4 text-emerald-500" />}

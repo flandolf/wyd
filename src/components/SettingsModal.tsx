@@ -108,7 +108,15 @@ export function SettingsModal({
         const importedData = JSON.parse(event.target?.result as string)
         if (Array.isArray(importedData)) {
           const isValidSubject = (item: any): item is SubjectData => {
-            return typeof item === 'object' && item !== null && typeof item.id === 'string' && typeof item.title === 'string'
+            return (
+              typeof item === 'object' &&
+              item !== null &&
+              typeof item.id === 'string' &&
+              typeof item.title === 'string' &&
+              (item.startTime === null || typeof item.startTime === 'number') &&
+              typeof item.accumulatedTime === 'number' &&
+              typeof item.isRunning === 'boolean'
+            )
           }
 
           const validItems = importedData.filter(isValidSubject)
