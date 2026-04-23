@@ -1,13 +1,12 @@
 import { useEffect, useState, useMemo } from 'react'
 import {
   BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
-  PieChart, Pie, Cell,
   RenderableText,
   TooltipValueType
 } from 'recharts'
 import { invoke } from '@tauri-apps/api/core'
 import { SubjectData } from '../SubjectItem'
-import { Flame, Clock, TrendingUp, Calendar } from 'lucide-react'
+import { DEFAULT_SUBJECT_COLOR, CHART_COLORS } from '../../lib/constants'
 
 function localDateKeyFromDate(date: Date): string {
   const year = date.getFullYear()
@@ -63,76 +62,196 @@ function WeeklyHeatmap({
   selectedDate: string | null
   onSelectDate: (date: string | null) => void
 }) {
-  const cells = useMemo(() => {
+  const { weeks, monthLabels, totalActive, longestStreak, peakDay } = useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const start = new Date(today)
-    start.setDate(today.getDate() - 34)
-    const startDow = start.getDay()
-    const paddedStart = new Date(start)
-    paddedStart.setDate(start.getDate() - startDow)
 
-    const grid: Array<{ date: string; totalMs: number; isInRange: boolean }> = []
-    const d = new Date(paddedStart)
+    const weeksToShow = 26
+    // Start from the Sunday that begins the first week
+    const end = new Date(today)
+    const startRaw = new Date(today)
+    startRaw.setDate(today.getDate() - (weeksToShow * 7 - 1))
+    const startDow = startRaw.getDay()
+    const alignedStart = new Date(startRaw)
+    alignedStart.setDate(startRaw.getDate() - startDow)
 
-    for (let i = 0; i < 35; i++) {
-      const key = localDateKeyFromDate(d)
-      const isInRange = d >= start && d <= today
-      grid.push({ date: key, totalMs: datesMap[key] || 0, isInRange })
-      d.setDate(d.getDate() + 1)
+    // Build week columns: each week is an array of 7 days (Sun–Sat)
+    const weekCols: Array<Array<{ date: string; totalMs: number; isInRange: boolean }>> = []
+    const monthLabelMap: Array<{ label: string; weekIndex: number }> = []
+    let lastMonth = -1
+    const d = new Date(alignedStart)
+
+    while (d <= end) {
+      const week: Array<{ date: string; totalMs: number; isInRange: boolean }> = []
+      for (let dow = 0; dow < 7; dow++) {
+        const key = localDateKeyFromDate(d)
+        const isInRange = d >= startRaw && d <= today
+        week.push({ date: key, totalMs: datesMap[key] || 0, isInRange })
+        if (isInRange && d.getMonth() !== lastMonth) {
+          lastMonth = d.getMonth()
+          monthLabelMap.push({ label: d.toLocaleDateString('en-US', { month: 'short' }), weekIndex: weekCols.length })
+        }
+        d.setDate(d.getDate() + 1)
+      }
+      weekCols.push(week)
     }
-    return grid
+
+    // Compute extra stats
+    let totalActive = 0
+    let peakMs = 0
+    let peakDay = ''
+    Object.entries(datesMap).forEach(([date, ms]) => {
+      if (ms > 0) { totalActive++; if (ms > peakMs) { peakMs = ms; peakDay = date } }
+    })
+
+    // Longest streak calc
+    const sortedDays = Object.keys(datesMap).filter(k => datesMap[k] > 0).sort()
+    let longest = 0, cur = 0, prev: Date | null = null
+    sortedDays.forEach(d => {
+      const dt = new Date(d + 'T00:00:00')
+      if (prev) {
+        const diff = (dt.getTime() - prev.getTime()) / 86400000
+        cur = diff === 1 ? cur + 1 : 1
+      } else { cur = 1 }
+      if (cur > longest) longest = cur
+      prev = dt
+    })
+
+    return { weeks: weekCols, monthLabels: monthLabelMap, totalActive, longestStreak: longest, peakDay }
   }, [datesMap])
 
-  const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+  const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const INTENSITY_LABELS = ['None', '< 1h', '1–3h', '3–6h', '6h+']
+
+  const getCellStyle = (intensity: number, isSelected: boolean) => {
+    const base = [
+      { bg: 'var(--muted)', opacity: 0.15, shadow: 'none' },
+      { bg: 'var(--foreground)', opacity: 0.12, shadow: 'none' },
+      { bg: 'var(--foreground)', opacity: 0.32, shadow: 'none' },
+      { bg: 'var(--foreground)', opacity: 0.62, shadow: 'none' },
+      { bg: 'var(--foreground)', opacity: 1, shadow: '0 0 10px rgba(255,255,255,0.15)' },
+    ][intensity]
+    return {
+      backgroundColor: base.bg,
+      opacity: base.opacity,
+      boxShadow: isSelected ? '0 0 0 2px var(--foreground), 0 0 0 3px var(--background)' : base.shadow,
+    }
+  }
 
   return (
-    <div>
-      <div className="grid grid-cols-7 gap-1 mb-1">
-        {DOW.map((d, i) => (
-          <div key={i} className="text-center text-[9px] font-medium text-muted-foreground/50">{d}</div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((day, i) => {
-          if (!day.isInRange) return <div key={i} className="w-full aspect-square" />
-          const intensity = day.totalMs === 0 ? 0 : day.totalMs < 3600000 ? 1 : day.totalMs < 10800000 ? 2 : day.totalMs < 21600000 ? 3 : 4
-          const bgClass = [
-            'bg-muted/50 border border-border/50',
-            'bg-emerald-900/50 border border-emerald-900/20',
-            'bg-emerald-700/60 border border-emerald-700/20',
-            'bg-emerald-500/80 border border-emerald-500/20',
-            'bg-emerald-400 border border-emerald-400/20 shadow-[0_0_6px_rgba(52,211,153,0.35)]',
-          ][intensity]
-
+    <div className="space-y-5">
+      {/* Month labels row */}
+      <div className="flex" style={{ paddingLeft: 32 }}>
+        {weeks.map((_, wi) => {
+          const label = monthLabels.find(m => m.weekIndex === wi)
           return (
-            <div
-              key={i}
-              onClick={() => onSelectDate(selectedDate === day.date ? null : day.date)}
-              className={`w-full aspect-square rounded-[3px] ${bgClass} transition-transform hover:scale-110 cursor-pointer ${
-                selectedDate === day.date ? 'ring-2 ring-primary ring-offset-1 ring-offset-background' : ''
-                }`}
-              title={`${day.date}: ${formatMsToHhMm(day.totalMs)}`}
-            />
+            <div key={wi} className="flex-1 min-w-0">
+              {label && (
+                <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50">
+                  {label.label}
+                </span>
+              )}
+            </div>
           )
         })}
+      </div>
+
+      {/* Grid: DOW labels + week columns */}
+      <div className="flex gap-0">
+        {/* Day-of-week labels */}
+        <div className="flex flex-col justify-around pr-2" style={{ width: 30 }}>
+          {DOW_LABELS.map((d, i) => (
+            i % 2 === 1
+              ? <div key={i} className="text-[9px] font-bold text-muted-foreground/40 uppercase tracking-widest leading-none">{d[0]}</div>
+              : <div key={i} />
+          ))}
+        </div>
+
+        {/* Week columns */}
+        <div className="flex flex-1 gap-0.75">
+          {weeks.map((week, wi) => (
+            <div key={wi} className="flex flex-col flex-1 gap-0.75">
+              {week.map((day, di) => {
+                if (!day.isInRange) return <div key={di} className="flex-1 rounded-xs" />
+                const intensity = day.totalMs === 0 ? 0 : day.totalMs < 3600000 ? 1 : day.totalMs < 10800000 ? 2 : day.totalMs < 21600000 ? 3 : 4
+                const isSelected = selectedDate === day.date
+                const cellStyle = getCellStyle(intensity, isSelected)
+                return (
+                  <div
+                    key={di}
+                    onClick={() => onSelectDate(isSelected ? null : day.date)}
+                    title={`${day.date}: ${formatMsToHhMm(day.totalMs)}`}
+                    className="flex-1 rounded-xs cursor-pointer transition-transform duration-150 hover:scale-105"
+                    style={{
+                      ...cellStyle,
+                      minHeight: '2.5vh',
+                      transform: isSelected ? 'scale(1.05)' : undefined,
+                      zIndex: isSelected ? 10 : undefined,
+                      position: 'relative',
+                    }}
+                  />
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Footer: legend + mini stats */}
+      <div className="flex items-center justify-between pt-1">
+        {/* Legend */}
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40">Less</span>
+          <div className="flex gap-0.75">
+            {[0, 1, 2, 3, 4].map(i => {
+              const style = getCellStyle(i, false)
+              return (
+                <div
+                  key={i}
+                  title={INTENSITY_LABELS[i]}
+                  className="rounded-xs"
+                  style={{ ...style, width: 10, height: 10 }}
+                />
+              )
+            })}
+          </div>
+          <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40">More</span>
+        </div>
+
+        {/* Mini stats */}
+        <div className="flex items-center gap-6">
+          <div className="text-right">
+            <div className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40">Active Days</div>
+            <div className="text-xs font-black tabular-nums">{totalActive}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40">Longest Streak</div>
+            <div className="text-xs font-black tabular-nums">{longestStreak}d</div>
+          </div>
+          {peakDay && (
+            <div className="text-right">
+              <div className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40">Best Day</div>
+              <div className="text-xs font-black tabular-nums">{new Date(peakDay + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
 function TimeOfDayBars({ data }: { data: Array<{ name: string; value: number; color: string }> }) {
-  if (data.length === 0) return <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">No data available.</div>
+  if (data.length === 0) return <div className="flex-1 flex items-center justify-center text-[10px] text-muted-foreground font-bold uppercase tracking-widest">No data</div>
   const maxMs = Math.max(...data.map(d => d.value), 1)
   return (
     <div className="space-y-4 w-full">
       {data.map((item, i) => (
-        <div key={i} className="space-y-1.5">
-          <div className="flex justify-between text-[11px] font-medium px-0.5">
-            <span className="text-muted-foreground">{item.name.split(' ')[0]}</span>
-            <span className="tabular-nums">{formatMsToHhMm(item.value)}</span>
+        <div key={i} className="space-y-1">
+          <div className="flex justify-between text-[10px] font-bold px-0.5 uppercase tracking-wider">
+            <span className="text-muted-foreground/60">{item.name.split(' ')[0]}</span>
+            <span className="tabular-nums text-muted-foreground">{formatMsToHhMm(item.value)}</span>
           </div>
-          <div className="flex-1 bg-muted/30 rounded-full h-2 overflow-hidden">
+          <div className="flex-1 bg-muted/20 rounded-full h-1 overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700"
               style={{ width: `${(item.value / maxMs) * 100}%`, backgroundColor: item.color }}
@@ -173,7 +292,6 @@ export function Stats() {
     return () => { isActive = false; window.removeEventListener('wyd:data-updated', onDataUpdated) }
   }, [])
 
-  const todayDateKey = localDateKeyFromDate(new Date())
 
   const rangeStartTimeMs = useMemo(() => {
     if (timeRange === 'all') return 0
@@ -183,10 +301,14 @@ export function Stats() {
     return d.getTime()
   }, [timeRange])
 
-  const { dailyData, subjectData, timeOfDayData } = useMemo(() => {
+  const { dailyData, subjectData, timeOfDayData, extraMetrics } = useMemo(() => {
     const datesMap: Record<string, { date: string; totalMs: number }> = {}
     const subjectMap: Record<string, { name: string; totalMs: number; color: string }> = {}
     const todMap: Record<string, number> = { 'Morning (6AM-12PM)': 0, 'Afternoon (12PM-6PM)': 0, 'Evening (6PM-12AM)': 0, 'Night (12AM-6AM)': 0 }
+    
+    let totalSessions = 0
+    let totalDurationMs = 0
+    let activeDays = new Set<string>()
 
     const daysToGen = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 0
     if (daysToGen > 0) {
@@ -208,6 +330,10 @@ export function Stats() {
 
           if (isInRange && isSelectedDay) {
             swTotalMsInRange += session.durationMs
+            totalDurationMs += session.durationMs
+            totalSessions++
+            activeDays.add(sessionDateStr)
+
             if (!datesMap[sessionDateStr]) datesMap[sessionDateStr] = { date: sessionDateStr, totalMs: 0 }
             datesMap[sessionDateStr].totalMs += session.durationMs
             const h = sessionDateObj.getHours()
@@ -218,7 +344,7 @@ export function Stats() {
           }
         })
       }
-      if (swTotalMsInRange > 0) subjectMap[sw.id] = { name: sw.title, totalMs: swTotalMsInRange, color: sw.color || '#22c55e' }
+      if (swTotalMsInRange > 0) subjectMap[sw.id] = { name: sw.title, totalMs: swTotalMsInRange, color: sw.color || DEFAULT_SUBJECT_COLOR }
     })
 
     const dailyArr = Object.values(datesMap).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
@@ -228,10 +354,18 @@ export function Stats() {
       hours: Number((item.totalMs / 3600000).toFixed(2))
     }))
 
+    const avgSessionMs = totalSessions > 0 ? totalDurationMs / totalSessions : 0
+    const intensityScore = activeDays.size > 0 ? (totalDurationMs / activeDays.size / 3600000).toFixed(1) : '0'
+
     return {
       dailyData: formattedDaily,
       subjectData: Object.values(subjectMap).map(sw => ({ name: sw.name, value: sw.totalMs, color: sw.color })).sort((a, b) => b.value - a.value),
-      timeOfDayData: Object.entries(todMap).filter(([_, v]) => v > 0).map(([name, value]) => ({ name, value, color: name.includes('Morning') ? '#fcd34d' : name.includes('Afternoon') ? '#f97316' : name.includes('Evening') ? '#3b82f6' : '#1e3a8a' }))
+      timeOfDayData: Object.entries(todMap).filter(([_, v]) => v > 0).map(([name, value]) => ({ name, value, color: name.includes('Morning') ? CHART_COLORS.morning : name.includes('Afternoon') ? CHART_COLORS.afternoon : name.includes('Evening') ? CHART_COLORS.evening : CHART_COLORS.night })),
+      extraMetrics: {
+        avgSession: formatMsToHhMm(avgSessionMs),
+        totalSessions,
+        intensityScore
+      }
     }
   }, [data, timeRange, rangeStartTimeMs, selectedDate])
 
@@ -251,84 +385,102 @@ export function Stats() {
 
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col font-sans overflow-hidden">
-      <div className="h-8 shrink-0 flex items-center px-4 bg-muted/20 border-b border-border/40" style={{ WebkitAppRegion: 'drag' } as any}>
-        <div className="text-xs font-medium text-muted-foreground/80">Statistics</div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-          <h1 className="text-3xl font-extrabold tracking-tight">Your Performance</h1>
-          <div className="flex p-1 bg-muted rounded-xl gap-0.5">
-            {(['7d', '30d', 'all'] as const).map(range => (
-              <button key={range} onClick={() => { setTimeRange(range); setSelectedDate(null) }} className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${timeRange === range && !selectedDate ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                {range === '7d' ? '7 Days' : range === '30d' ? '30 Days' : 'All Time'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {[
-            { label: 'All-Time', value: totalHoursEver, unit: 'hrs', icon: <Clock className="w-4 h-4 text-blue-500" />, bg: 'bg-blue-500/10' },
-            { label: 'Daily Avg', value: avgDailyHours, unit: 'hrs', icon: <TrendingUp className="w-4 h-4 text-purple-500" />, bg: 'bg-purple-500/10' },
-            { label: 'Streak', value: String(studyStreak), unit: 'days', icon: <Flame className="w-4 h-4 text-orange-500" />, bg: 'bg-orange-500/10' },
-            { label: 'Today', value: ((allTimeDatesMap[todayDateKey] || 0) / 3600000).toFixed(1), unit: 'hrs', icon: <Calendar className="w-4 h-4 text-emerald-500" />, bg: 'bg-emerald-500/10' },
-          ].map((card, i) => (
-            <div key={i} className="p-5 rounded-2xl border bg-card/50 shadow-sm">
-              <div className="flex items-center gap-2 mb-2">
-                <div className={`p-2 rounded-lg ${card.bg}`}>{card.icon}</div>
-                <span className="text-xs font-medium text-muted-foreground">{card.label}</span>
-              </div>
-              <div className="text-2xl font-black tabular-nums">{card.value}<span className="text-xs font-normal text-muted-foreground ml-1">{card.unit}</span></div>
-            </div>
+      <div className="h-10 shrink-0 flex items-center justify-between px-4 bg-muted/20 border-b border-border/40" style={{ WebkitAppRegion: 'drag' } as any}>
+        <div className="text-xs font-medium text-muted-foreground/80 uppercase tracking-widest">Stats</div>
+        <div className="flex bg-muted/50 p-0.5 rounded-lg">
+          {(['7d', '30d', 'all'] as const).map(range => (
+            <button key={range} onClick={() => { setTimeRange(range); setSelectedDate(null) }} className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${timeRange === range && !selectedDate ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              {range.toUpperCase()}
+            </button>
           ))}
         </div>
+      </div>
 
-        {/* Study Time Chart - Fixed Height Container */}
-        <div className="p-6 rounded-2xl border bg-card/50 shadow-sm mb-8">
-          <h2 className="text-base font-bold mb-6">Study Time Per Day</h2>
-          <div className="h-70 w-full">
-            {dailyData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} strokeOpacity={0.1} />
-                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                  <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '8px' }} />
-                  <Bar dataKey="hours" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <div className="h-full flex items-center justify-center text-muted-foreground">No data available</div>}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-          {/* Pie Chart - Fixed Height Container */}
-          <div className="p-6 rounded-2xl border bg-card/50 shadow-sm">
-            <h2 className="text-base font-bold mb-6">Time by Subject</h2>
-            <div className="h-60 w-full">
-              {subjectData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={subjectData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none">
-                      {subjectData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                    </Pie>
-                    <Tooltip formatter={formatMsToHhMm} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : <div className="h-full flex items-center justify-center text-muted-foreground">No subjects</div>}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-7xl mx-auto px-6 py-10">
+          
+          <div className="flex flex-wrap gap-x-12 gap-y-6 mb-16">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Focused</span>
+              <div className="text-3xl font-black tabular-nums">{totalHoursEver}<span className="text-sm font-medium text-muted-foreground ml-1">h</span></div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Daily Avg</span>
+              <div className="text-3xl font-black tabular-nums">{avgDailyHours}<span className="text-sm font-medium text-muted-foreground ml-1">h</span></div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Current Streak</span>
+              <div className="text-3xl font-black tabular-nums text-orange-500">{studyStreak}<span className="text-sm font-medium text-muted-foreground ml-1">d</span></div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Sessions</span>
+              <div className="text-3xl font-black tabular-nums">{extraMetrics.totalSessions}</div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Avg Session</span>
+              <div className="text-3xl font-black tabular-nums">{extraMetrics.avgSession}</div>
             </div>
           </div>
 
-          <div className="p-6 rounded-2xl border bg-card/50 shadow-sm">
-            <h2 className="text-base font-bold mb-6">Time of Day</h2>
-            <TimeOfDayBars data={timeOfDayData} />
-          </div>
-        </div>
+          <div className="space-y-20">
+            <section>
+              <div className="flex items-center gap-4 mb-8">
+                <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Study Distribution</h2>
+                <div className="h-px flex-1 bg-border/40" />
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dailyData} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} strokeOpacity={0.05} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'var(--muted-foreground)', fontWeight: 600 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'var(--muted-foreground)', fontWeight: 600 }} />
+                      <Tooltip cursor={{ fill: 'var(--muted)', opacity: 0.1 }} contentStyle={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '10px' }} />
+                      <Bar dataKey="hours" fill="var(--foreground)" radius={[2, 2, 0, 0]} maxBarSize={32} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">Subjects</h3>
+                    <div className="space-y-2">
+                      {subjectData.slice(0, 5).map((s, i) => (
+                        <div key={i} className="flex items-center justify-between group">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: s.color }} />
+                            <span className="text-xs font-medium truncate max-w-30">{s.name}</span>
+                          </div>
+                          <span className="text-[10px] font-bold tabular-nums text-muted-foreground">{formatMsToHhMm(s.value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">Routine</h3>
+                    <TimeOfDayBars data={timeOfDayData} />
+                  </div>
+                </div>
+              </div>
+            </section>
 
-        <div className="p-6 rounded-2xl border bg-card/50 shadow-sm mb-8">
-          <h2 className="text-base font-bold mb-5">Activity Heatmap <span className="ml-2 text-xs font-normal text-muted-foreground">Last 35 days</span></h2>
-          <WeeklyHeatmap datesMap={allTimeDatesMap} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+            <section>
+              <div className="flex items-center gap-4 mb-8">
+                <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Activity Intensity</h2>
+                <div className="h-px flex-1 bg-border/40" />
+                {selectedDate && (
+                  <button
+                    onClick={() => setSelectedDate(null)}
+                    className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors px-2 py-0.5 rounded-md border border-border/40 hover:border-border"
+                  >
+                    {selectedDate} ✕
+                  </button>
+                )}
+              </div>
+              <div className="bg-muted/5 rounded-2xl border border-border/30 p-6 pb-5">
+                <WeeklyHeatmap datesMap={allTimeDatesMap} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </div>

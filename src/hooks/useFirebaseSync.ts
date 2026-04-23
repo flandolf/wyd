@@ -14,13 +14,16 @@ export function useFirebaseSync(
 ) {
   const isRemoteUpdate = useRef(false)
   const unsubRef = useRef<Unsubscribe | null>(null)
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevSubjectsRef = useRef<string>('')
   const [syncState, setSyncState] = useState<SyncState>('idle')
   const [syncError, setSyncError] = useState<string | null>(null)
   const [retryTick, setRetryTick] = useState(0)
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+
     const updateOnlineStatus = () => {
-      if (typeof navigator === 'undefined') return
       if (!navigator.onLine) {
         setSyncState('offline')
       } else if (user) {
@@ -50,15 +53,25 @@ export function useFirebaseSync(
     }
 
     const userRef = ref(db, `users/${user.uid}/subjects`)
-    unsubRef.current = onValue(userRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data && Array.isArray(data)) {
-        isRemoteUpdate.current = true
-        onRemoteUpdate(data)
+    unsubRef.current = onValue(
+      userRef,
+      (snapshot) => {
+        const data = snapshot.val()
+        if (data && Array.isArray(data)) {
+          isRemoteUpdate.current = true
+          onRemoteUpdate(data)
+          setTimeout(() => {
+            isRemoteUpdate.current = false
+          }, 0)
+        }
+        setSyncState('synced')
+        setSyncError(null)
+      },
+      (error) => {
+        setSyncState('error')
+        setSyncError(error.message)
       }
-      setSyncState('synced')
-      setSyncError(null)
-    })
+    )
 
     return () => {
       if (unsubRef.current) {
@@ -66,7 +79,7 @@ export function useFirebaseSync(
         unsubRef.current = null
       }
     }
-  }, [user, onRemoteUpdate])
+  }, [user])
 
   // Push local changes to Firebase
   const pushToFirebase = useCallback(async () => {
@@ -78,6 +91,12 @@ export function useFirebaseSync(
       setSyncState('offline')
       return
     }
+
+    const currentSubjectsJson = JSON.stringify(subjects)
+    if (currentSubjectsJson === prevSubjectsRef.current) {
+      return
+    }
+    prevSubjectsRef.current = currentSubjectsJson
 
     const userRef = ref(db, `users/${user.uid}/subjects`)
     setSyncState('syncing')
@@ -92,7 +111,18 @@ export function useFirebaseSync(
   }, [user, subjects, isLoaded])
 
   useEffect(() => {
-    pushToFirebase()
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current)
+    }
+    syncTimeoutRef.current = setTimeout(() => {
+      pushToFirebase()
+    }, 500)
+
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current)
+      }
+    }
   }, [pushToFirebase, retryTick])
 
   const retrySync = useCallback(() => {

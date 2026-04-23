@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "wyd2",
         "width": 400,
         "height": 650,
@@ -19,6 +20,15 @@
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
         "decorations": false
+      },
+      {
+        "label": "stats",
+        "title": "Stats",
+        "url": "index.html#stats",
+        "width": 800,
+        "height": 600,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {
