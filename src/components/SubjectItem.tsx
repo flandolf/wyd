@@ -139,7 +139,12 @@ export function SubjectItem({
       )}>
         <button
           onClick={() => onToggle(subject.id)}
-          className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground leading-none"
+          className={cn(
+            "shrink-0 w-8 text-xs font-medium leading-none transition-colors text-center",
+            subject.isRunning 
+              ? "text-destructive hover:text-destructive/80" 
+              : "text-chart-2 hover:text-chart-2/80"
+          )}
         >
           {subject.isRunning ? 'Stop' : 'Start'}
         </button>
@@ -153,7 +158,10 @@ export function SubjectItem({
           </span>
         </div>
 
-        <span className="text-xs tabular-nums leading-none">
+        <span className={cn(
+            "text-xs tabular-nums leading-none",
+            subject.isCompleted && "line-through"
+          )}>
           {formatTime(targetMs)}
         </span>
 
